@@ -16,7 +16,7 @@
  */
 
 var PORTFOLIO_FILE = "ksa-portfolio.json";
-var REFRESH_HOUR   = 20;            // ~5h after Tadawul close, Riyadh time
+var REFRESH_HOUR   = 16;            // ~1h after the 15:00 Tadawul close (Sun–Thu) — captures the closing price
 var TIMEZONE       = "Asia/Riyadh";
 
 function refreshPrices() {

@@ -52,7 +52,7 @@ A small Google Apps Script updates prices in that same Drive file once a day.
 3. Run **`installDailyTrigger`** once (top toolbar: select the function → Run). Authorize Drive access when prompted.
 4. (Optional) Run **`refreshPrices`** once now to test — check **Execution log** for `✓ 4009 → …` lines.
 
-It then runs daily ~20:00 Riyadh (after Tadawul close). Prices flow into the dashboard next time it syncs.
+It then runs daily ~16:00 Riyadh — about an hour after the 15:00 Tadawul close — so it captures the official **closing price**. Prices flow into the dashboard next time it syncs. (It runs every day; on Fri/Sat and holidays the market's closed, so it just re-writes the last close — harmless.)
 
 > The price source is Yahoo Finance (`<ticker>.SR`) — an unofficial endpoint. If a price returns 0 the old one is kept, and the log tells you. If Yahoo stops working, swap `fetchPrice_()` for another source.
 
