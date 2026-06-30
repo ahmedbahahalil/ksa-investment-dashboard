@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KSA Passive Income Dashboard</title>
+<style>
+  :root{
+    --bg:#f6f7f5; --card:#ffffff; --ink:#16201b; --muted:#6b7770;
+    --line:#e4e8e4; --accent:#15803d; --accent-soft:#e7f3ec;
+    --warn:#b45309; --warn-soft:#fdf3e7; --danger:#be123c;
+    --banking:#15803d; --energy:#0e7490; --utilities:#b45309;
+    --telecoms:#6d28d9; --other:#be123c; --realestate:#0f766e;
+    --radius:14px; --shadow:0 1px 2px rgba(20,32,27,.05),0 4px 16px rgba(20,32,27,.04);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px 16px 64px}
+  a{color:var(--accent)}
+  h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
+  .muted{color:var(--muted)}
+  .small{font-size:13px}
+  .tiny{font-size:12px}
+  /* header */
+  header.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:8px}
+  .logo{width:38px;height:38px;border-radius:10px;background:var(--accent);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;flex:0 0 auto}
+  .title h1{font-size:20px}
+  .title .sub{font-size:13px;color:var(--muted)}
+  .grow{flex:1 1 auto}
+  /* banner */
+  .banner{display:flex;gap:10px;align-items:flex-start;background:var(--warn-soft);
+    border:1px solid #f0dcc0;color:#7c4a06;border-radius:12px;padding:10px 12px;margin:12px 0;font-size:13px}
+  .banner b{color:#6b3e04}
+  /* tabs */
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:4px;margin:14px 0 18px;box-shadow:var(--shadow)}
+  .tab{appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;
+    font-size:14px;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:550;white-space:nowrap}
+  .tab:hover{color:var(--ink)}
+  .tab.active{background:var(--accent-soft);color:var(--accent)}
+  /* cards */
+  .grid{display:grid;gap:14px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px;box-shadow:var(--shadow)}
+  .stat .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+  .stat .value{font-size:26px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+  .stat .value .unit{font-size:14px;color:var(--muted);font-weight:600;margin-left:4px}
+  .stat .foot{font-size:12px;color:var(--muted);margin-top:4px}
+  .pos{color:var(--accent)} .neg{color:var(--danger)}
+  section{margin-top:18px}
+  .sec-head{display:flex;align-items:center;gap:10px;margin:0 2px 10px}
+  .sec-head h2{font-size:15px}
+  .sec-head .hint{font-size:12px;color:var(--muted)}
+  /* table */
+  .tbl-wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);
+    border-radius:var(--radius);box-shadow:var(--shadow)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+  th,td{padding:9px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+    font-weight:650;background:#fbfcfb;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:#fbfdfb}
+  td.num{font-variant-numeric:tabular-nums}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;
+    padding:2px 8px;border-radius:999px;background:#f0f2f0;color:var(--ink)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+  .pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+  .pill.buy{background:var(--accent-soft);color:var(--accent)}
+  .pill.hold{background:#eef0ee;color:var(--muted)}
+  .pill.sell{background:#fde7ea;color:var(--danger)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{appearance:none;border:0;background:#fff;padding:8px 13px;font:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+  .seg button.on{background:var(--accent-soft);color:var(--accent)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .cloud{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;white-space:nowrap}
+  .cloud:hover{border-color:#cfd6cf}
+  .cloud.on{background:var(--accent-soft);color:var(--accent);border-color:transparent;cursor:default}
+  .cloud.err{background:var(--warn-soft);color:var(--warn);border-color:#f0dcc0}
+  .cloud .dotc{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
+  /* inputs */
+  input,select{font:inherit;font-size:13.5px;color:var(--ink);background:#fff;
+    border:1px solid var(--line);border-radius:8px;padding:6px 8px;width:100%}
+  input:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  input.cell{padding:5px 7px;text-align:right;background:#fbfcfb}
+  input.cell:focus{background:#fff}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{font-size:12px;color:var(--muted);font-weight:600}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  /* buttons */
+  .btn{appearance:none;font:inherit;font-size:13px;font-weight:600;border-radius:9px;
+    padding:8px 13px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink)}
+  .btn:hover{border-color:#cfd6cf}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(.96)}
+  .btn.ghost{background:transparent}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .icon-btn{border:0;background:transparent;cursor:pointer;color:var(--muted);font-size:15px;padding:4px}
+  .icon-btn:hover{color:var(--danger)}
+  /* charts */
+  .two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:14px}
+  .legend{display:flex;flex-direction:column;gap:8px;justify-content:center}
+  .legend .row{display:flex;align-items:center;gap:9px;font-size:13px}
+  .legend .row .nm{flex:1 1 auto}
+  .legend .row .vl{font-variant-numeric:tabular-nums;font-weight:600}
+  .bar-row{display:grid;grid-template-columns:96px 1fr auto;gap:10px;align-items:center;margin:9px 0}
+  .bar-track{position:relative;height:18px;background:#f0f2f0;border-radius:6px;overflow:hidden}
+  .bar-fill{position:absolute;top:0;left:0;bottom:0;border-radius:6px}
+  .bar-target{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.55}
+  .center-note{text-align:center}
+  .empty{padding:26px 16px;text-align:center;color:var(--muted);font-size:13px}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .kv:last-child{border-bottom:0}
+  .kv .k{color:var(--muted)}
+  .kv .v{font-weight:600;font-variant-numeric:tabular-nums}
+  .toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600}
+  .toggle input{width:auto}
+  footer{margin-top:28px;color:var(--muted);font-size:12px;line-height:1.6}
+  footer ul{margin:6px 0 0;padding-left:18px}
+  @media(max-width:720px){
+    .two-col{grid-template-columns:1fr}
+    .stat .value{font-size:22px}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useMemo,useRef} = React;
+const LS_KEY = "ksa-portfolio-v2";
+
+/* ----------------------------- defaults ----------------------------- */
+const SECTOR_COLORS = {
+  Banking:"var(--banking)", Energy:"var(--energy)", Utilities:"var(--utilities)",
+  Telecoms:"var(--telecoms)", Other:"var(--other)", "Real Estate":"var(--realestate)"
+};
+const SECTOR_HEX = {
+  Banking:"#15803d", Financials:"#047857", Energy:"#0e7490", Materials:"#a16207",
+  Utilities:"#b45309", Telecoms:"#6d28d9", Healthcare:"#db2777", Industrials:"#475569",
+  "Real Estate":"#0f766e", Consumer:"#c2410c", Other:"#be123c"
+};
+
+// Loaded from Ahmed's Sahm account (30 Jun 2026), prices kept from his app so P/L matches.
+// Dividend yields ~ TTM from Argaam / market data (Jun 2026) — approximate, verify before relying.
+const DEFAULT_HOLDINGS = [
+  {ticker:"4009", name:"Saudi German Health",   sector:"Healthcare",  targetPct:16, price:31.86, shares:3,  avgCost:35.42, yield:1.5},
+  {ticker:"1303", name:"Electrical Industries", sector:"Industrials", targetPct:27, price:14.43, shares:11, avgCost:13.46, yield:2.2},
+  {ticker:"4220", name:"Emaar EC",              sector:"Real Estate", targetPct:20, price:9.98,  shares:12, avgCost:9.62,  yield:0},
+  {ticker:"4327", name:"Alramz Real Estate",    sector:"Real Estate", targetPct:37, price:55.80, shares:4,  avgCost:54.40, yield:2.9},
+];
+
+const DEFAULT_STATE = {
+  settings:{ monthlyBudget:1000, stakePct:35, sahmPct:65, reinvest:true, years:5, pricesUpdated:"2026-06-30 (Sahm)" },
+  cash:23.84,
+  stake:{ currentValue:1100, yield:9.4 },
+  holdings: DEFAULT_HOLDINGS.map(h=>({...h})),
+  transactions:[],
+  dividends:[],
+};
+
+/* ----------------------------- helpers ------------------------------ */
+const ALL_SECTORS = ["Banking","Financials","Energy","Materials","Utilities","Telecoms","Healthcare","Industrials","Real Estate","Consumer","Other"];
+function usedSectors(holdings){ const o=[]; holdings.forEach(h=>{ if(!o.includes(h.sector)) o.push(h.sector); }); return o; }
+const fmt = (n,d=0)=> (isFinite(n)?n:0).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const sar = (n,d=0)=> fmt(n,d)+" SAR";
+const pct = (n,d=1)=> fmt(n,d)+"%";
+const num = v => { const x=parseFloat(v); return isFinite(x)?x:0; };
+
+function mergeState(s){
+  s = s || {};
+  return {
+    ...DEFAULT_STATE, ...s,
+    settings:{...DEFAULT_STATE.settings, ...(s.settings||{})},
+    stake:{...DEFAULT_STATE.stake, ...(s.stake||{})},
+    holdings: Array.isArray(s.holdings)&&s.holdings.length ? s.holdings : DEFAULT_STATE.holdings,
+    transactions: s.transactions||[],
+    dividends: s.dividends||[],
+  };
+}
+function loadState(){
+  try{ const raw = localStorage.getItem(LS_KEY); return raw ? mergeState(JSON.parse(raw)) : DEFAULT_STATE; }
+  catch(e){ return DEFAULT_STATE; }
+}
+
+/* ──────────────── Cloud sync — Google Drive (optional) ────────────────
+   Stores one private file "ksa-portfolio.json" in YOUR Google Drive so the
+   same data syncs across phone + laptop. No backend: the browser talks to
+   Google directly. Needs a one-time OAuth Client ID (see SETUP.md) — paste it
+   via "Connect Drive"; it's kept in localStorage. Without it the app is
+   local-only and everything below is simply unused. */
+const DRIVE_FILE_NAME = "ksa-portfolio.json";
+const GOOGLE_SCOPES   = "email https://www.googleapis.com/auth/drive.file";
+const GCID_KEY        = "ksa-google-client-id";
+const getClientId = () => (localStorage.getItem(GCID_KEY) || "").trim();
+const cloudConfigured = () => getClientId().length > 0;
+
+let _tokenClient=null, _tokenClientId="", _accessToken="", _tokenExp=0;
+const gisReady = () => !!(window.google && google.accounts && google.accounts.oauth2);
+function tokenClient(){
+  const cid = getClientId();
+  if(!cid || !gisReady()) return null;
+  if(_tokenClient && _tokenClientId===cid) return _tokenClient;
+  _tokenClientId = cid;
+  _tokenClient = google.accounts.oauth2.initTokenClient({ client_id:cid, scope:GOOGLE_SCOPES, callback:()=>{} });
+  return _tokenClient;
+}
+function getToken(){
+  return new Promise((resolve,reject)=>{
+    if(_accessToken && Date.now() < _tokenExp-60000) return resolve(_accessToken);
+    const tc = tokenClient();
+    if(!tc) return reject(new Error("Google sign-in not ready"));
+    tc.callback = (resp)=>{
+      if(resp && resp.error) return reject(new Error(resp.error));
+      _accessToken = resp.access_token;
+      _tokenExp = Date.now() + ((resp.expires_in||3600)*1000);
+      resolve(_accessToken);
+    };
+    tc.requestAccessToken({prompt:""});
+  });
+}
+async function driveApi(url, opts={}){
+  const token = await getToken();
+  const r = await fetch(url, {...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+token}});
+  if(r.status===401){ _accessToken=""; throw new Error("Google session expired — try again"); }
+  if(!r.ok) throw new Error("Google Drive error "+r.status);
+  return r;
+}
+async function driveWhoAmI(){
+  const r = await driveApi("https://www.googleapis.com/oauth2/v3/userinfo");
+  return (await r.json()).email || "";
+}
+async function driveFind(){
+  const q = encodeURIComponent("name='"+DRIVE_FILE_NAME+"' and trashed=false");
+  const r = await driveApi("https://www.googleapis.com/drive/v3/files?q="+q+"&spaces=drive&orderBy=modifiedTime desc&fields=files(id,modifiedTime)");
+  const j = await r.json();
+  return (j.files && j.files[0]) || null;
+}
+async function driveRead(id){
+  const r = await driveApi("https://www.googleapis.com/drive/v3/files/"+id+"?alt=media");
+  return await r.json();
+}
+async function driveCreate(data){
+  const fd = new FormData();
+  fd.append("metadata", new Blob([JSON.stringify({name:DRIVE_FILE_NAME, mimeType:"application/json"})], {type:"application/json"}));
+  fd.append("file", new Blob([JSON.stringify(data)], {type:"application/json"}));
+  const r = await driveApi("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {method:"POST", body:fd});
+  return (await r.json()).id;
+}
+async function driveWrite(id, data){
+  await driveApi("https://www.googleapis.com/upload/drive/v3/files/"+id+"?uploadType=media", {method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
+}
+
+function equityValue(holdings){ return holdings.reduce((a,h)=>a+num(h.price)*num(h.shares),0); }
+const holdingPL   = h  => (num(h.price)-num(h.avgCost))*num(h.shares);
+const portfolioCost = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? num(h.avgCost)*num(h.shares) : 0), 0);
+const portfolioPL   = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? holdingPL(h) : 0), 0);
+function weightedEquityYield(holdings){
+  const tw = holdings.reduce((a,h)=>a+num(h.targetPct),0)||1;
+  return holdings.reduce((a,h)=>a+num(h.targetPct)*num(h.yield),0)/tw;
+}
+function sectorAgg(holdings){
+  const eq = equityValue(holdings);
+  const m = {};
+  usedSectors(holdings).forEach(s=>m[s]={sector:s,target:0,current:0,curPct:0});
+  holdings.forEach(h=>{
+    const s = m[h.sector]||(m[h.sector]={sector:h.sector,target:0,current:0,curPct:0});
+    s.target += num(h.targetPct);
+    s.current += num(h.price)*num(h.shares);
+  });
+  Object.values(m).forEach(s=> s.curPct = eq>0 ? s.current/eq*100 : 0);
+  return Object.values(m);
+}
+
+// Cash-flow rebalancing. Greedily buys whole shares, each step choosing the
+// purchase that moves the portfolio CLOSEST to target weights (minimises total
+// absolute deviation). This deploys almost all the cash and won't dump a month's
+// budget into a high-priced, low-weight name. Anything it can't place sensibly
+// (e.g. one ACWA share costs more than its whole target slice) rolls to next month.
+function monthlyPlan(holdings, stockBudget){
+  const price  = holdings.map(h=>num(h.price));
+  const shares = holdings.map(h=>num(h.shares));
+  const bought = holdings.map(()=>0);
+  const curEq  = holdings.reduce((a,_,i)=>a+price[i]*shares[i],0);
+  const goal   = curEq + stockBudget;                 // target portfolio value after this month
+  const tgtVal = holdings.map(h=> goal*num(h.targetPct)/100);
+  let remaining = stockBudget, guard = 0;
+  while(guard++ < 100000){
+    let best=-1, bestImp=1e-9;                          // require a strictly positive improvement
+    for(let i=0;i<holdings.length;i++){
+      if(price[i]<=0 || price[i] > remaining+1e-9) continue;
+      const cur    = price[i]*(shares[i]+bought[i]);
+      const before = Math.abs(tgtVal[i]-cur);
+      const after  = Math.abs(tgtVal[i]-(cur+price[i]));
+      const imp    = before-after;
+      if(imp>bestImp){ bestImp=imp; best=i; }
+    }
+    if(best<0) break;
+    bought[best]++; remaining -= price[best];
+  }
+  const rows = holdings.map((h,i)=>{
+    const curVal = price[i]*shares[i];
+    return {...h, curVal, curPct: curEq>0?curVal/curEq*100:0, buyShares:bought[i], cost:price[i]*bought[i]};
+  });
+  const spent = rows.reduce((a,r)=>a+r.cost,0);
+  return {rows, curEq, spent, leftover: stockBudget-spent};
+}
+
+// Full rebalance toward target weights — can BUY and SELL. Optional extraCash adds the
+// month's new money to the pool. Whole-share rounding leaves a net-cash residual.
+function rebalancePlan(holdings, extraCash){
+  const price   = holdings.map(h=>num(h.price));
+  const shares0 = holdings.map(h=>num(h.shares));
+  const curEq   = holdings.reduce((a,_,i)=>a+price[i]*shares0[i],0);
+  const tw      = holdings.reduce((a,h)=>a+num(h.targetPct),0)||100;
+  const pool    = curEq + extraCash;                 // equity value to spread over target weights
+  const rows = holdings.map((h,i)=>{
+    const curVal    = price[i]*shares0[i];
+    const targetVal = pool*(num(h.targetPct)/tw);
+    const delta     = targetVal - curVal;
+    let action="HOLD", deltaShares=0;
+    if(price[i]>0){
+      if(delta>0){ deltaShares=Math.floor(delta/price[i]); if(deltaShares>0) action="BUY"; }
+      else if(delta<0){ deltaShares=Math.min(shares0[i], Math.floor((-delta)/price[i])); if(deltaShares>0) action="SELL"; }
+    }
+    return {...h, curVal, curPct: curEq>0?curVal/curEq*100:0, action, deltaShares, tradeValue:deltaShares*price[i]};
+  });
+  const sells = rows.filter(r=>r.action==="SELL").reduce((a,r)=>a+r.tradeValue,0);
+  const buys  = rows.filter(r=>r.action==="BUY").reduce((a,r)=>a+r.tradeValue,0);
+  return {rows, curEq, pool, sells, buys, netCash: extraCash + sells - buys};
+}
+
+function projectIncome(st){
+  const {settings:cfg, stake, holdings} = st;
+  const eqY = weightedEquityYield(holdings)/100;
+  const reY = num(stake.yield)/100;
+  const eqM = num(cfg.monthlyBudget)*num(cfg.sahmPct)/100;
+  const reM = num(cfg.monthlyBudget)*num(cfg.stakePct)/100;
+  let eqBal = equityValue(holdings);
+  let reBal = num(stake.currentValue);
+  let invested = eqBal+reBal;
+  const rows=[];
+  const years = Math.max(1,Math.min(15,num(cfg.years)||5));
+  for(let y=1;y<=years;y++){
+    let yearIncome=0;
+    for(let m=0;m<12;m++){
+      eqBal+=eqM; reBal+=reM; invested+=eqM+reM;
+      const inc = eqBal*eqY/12 + reBal*reY/12;
+      yearIncome+=inc;
+      if(cfg.reinvest){ eqBal+=eqBal*eqY/12; reBal+=reBal*reY/12; }
+    }
+    const runRate = eqBal*eqY/12 + reBal*reY/12;
+    rows.push({year:y, invested, value:eqBal+reBal, annualIncome:yearIncome, monthlyIncome:runRate});
+  }
+  return {rows, eqYield:eqY*100, reYield:reY*100};
+}
+
+function download(filename, text, type="text/plain"){
+  const blob = new Blob([text],{type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href=url; a.download=filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+/* ----------------------------- UI bits ------------------------------ */
+function Stat({label,value,unit,foot,footClass}){
+  return (
+    <div className="card stat">
+      <div className="label">{label}</div>
+      <div className="value">{value}{unit&&<span className="unit">{unit}</span>}</div>
+      {foot&&<div className={"foot "+(footClass||"")}>{foot}</div>}
+    </div>
+  );
+}
+
+function Donut({segments,size=190,stroke=30,center,sub}){
+  const r=(size-stroke)/2, c=2*Math.PI*r, cx=size/2, cy=size/2;
+  const total = segments.reduce((a,s)=>a+s.value,0);
+  let acc=0;
+  return (
+    <div style={{position:"relative",width:size,height:size,margin:"0 auto"}}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <g transform={`rotate(-90 ${cx} ${cy})`}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#eef0ee" strokeWidth={stroke}/>
+          {total>0 && segments.map((s,i)=>{
+            const frac=s.value/total, len=frac*c, off=-acc*c; acc+=frac;
+            return <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color}
+              strokeWidth={stroke} strokeDasharray={`${len} ${c-len}`} strokeDashoffset={off}
+              strokeLinecap="butt"/>;
+          })}
+        </g>
+      </svg>
+      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",
+        alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+        <div style={{fontWeight:700,fontSize:18,letterSpacing:"-.02em"}}>{center}</div>
+        {sub&&<div className="tiny muted">{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- tabs --------------------------------- */
+function Dashboard({st}){
+  const eq = equityValue(st.holdings);
+  const cash = num(st.cash);
+  const total = eq + cash + num(st.stake.currentValue);
+  const pl = portfolioPL(st.holdings);
+  const cost = portfolioCost(st.holdings);
+  const plPct = cost>0 ? pl/cost*100 : 0;
+  const proj = useMemo(()=>projectIncome(st),[st]);
+  const yr1 = proj.rows[0]||{}; const last = proj.rows[proj.rows.length-1]||{};
+  const sectors = sectorAgg(st.holdings);
+  const barMax = Math.max(30, ...sectors.flatMap(s=>[s.target, s.curPct]));
+
+  // top-level split donut: Sahm equity vs Stake real estate (by current value)
+  const splitSegs = [
+    {name:"Sahm (Equity)", value:eq, color:SECTOR_HEX.Banking},
+    {name:"Stake (Real Estate)", value:num(st.stake.currentValue), color:SECTOR_HEX["Real Estate"]},
+  ];
+  // sector donut (uses current value; falls back to target if no shares yet)
+  const hasShares = eq>0;
+  const sectorSegs = sectors.map(s=>({name:s.sector, value: hasShares?s.current:s.target, color:SECTOR_HEX[s.sector]||"#888"}));
+
+  return (
+    <div>
+      <div className="grid cards">
+        <Stat label="Total Portfolio" value={fmt(total)} unit="SAR"
+          foot={`${sar(eq)} equity · ${sar(cash)} cash · ${sar(num(st.stake.currentValue))} real estate`}/>
+        <Stat label="Unrealized P/L" value={(pl>=0?"+":"")+fmt(pl,2)} unit="SAR"
+          foot={(plPct>=0?"+":"")+pct(plPct,2)} footClass={pl>=0?"pos":"neg"}/>
+        <Stat label="Monthly Investment" value={fmt(st.settings.monthlyBudget)} unit="SAR"
+          foot={`${sar(st.settings.monthlyBudget*st.settings.sahmPct/100)} Sahm · ${sar(st.settings.monthlyBudget*st.settings.stakePct/100)} Stake`}/>
+        <Stat label="Projected Income · Yr 1" value={fmt(yr1.annualIncome)} unit="SAR/yr"
+          foot={`≈ ${sar(yr1.annualIncome/12)} / month`} footClass="pos"/>
+        <Stat label={`Projected · Yr ${last.year||5}`} value={fmt(last.value)} unit="SAR"
+          foot={`≈ ${sar(last.monthlyIncome)} / month income`} footClass="pos"/>
+      </div>
+
+      <section>
+        <div className="sec-head"><h2>Allocation</h2>
+          <span className="hint">{hasShares?"by current value":"showing targets — no holdings logged yet"}</span></div>
+        <div className="two-col">
+          <div className="card">
+            <div className="center-note small muted" style={{marginBottom:6}}>Platform split</div>
+            <Donut segments={splitSegs} center={fmt(total)} sub="SAR total"/>
+            <div className="legend" style={{marginTop:14}}>
+              {splitSegs.map(s=>(
+                <div className="row" key={s.name}>
+                  <span className="dot" style={{background:s.color}}/>
+                  <span className="nm">{s.name}</span>
+                  <span className="vl">{total>0?pct(s.value/total*100):"—"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card">
+            <div className="center-note small muted" style={{marginBottom:6}}>Equity sectors {hasShares?"(current)":"(target)"}</div>
+            <div className="two-col" style={{gridTemplateColumns:"190px 1fr",gap:10,alignItems:"center"}}>
+              <Donut segments={sectorSegs} center={sectors.length} sub="sectors"/>
+              <div className="legend">
+                {sectors.map(s=>(
+                    <div className="row" key={s.sector}>
+                      <span className="dot" style={{background:SECTOR_HEX[s.sector]||"#888"}}/>
+                      <span className="nm">{s.sector}</span>
+                      <span className="vl">{hasShares?pct(s.curPct):pct(s.target)}</span>
+                    </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div className="sec-head"><h2>Target vs. current</h2><span className="hint">marker = target weight</span></div>
+        <div className="card">
+          {sectors.map(s=>{
+            const max = barMax;
+            return (
+              <div className="bar-row" key={s.sector}>
+                <span className="small">{s.sector}</span>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{width:Math.min(100,s.curPct/max*100)+"%",background:SECTOR_HEX[s.sector],opacity:.85}}/>
+                  <div className="bar-target" style={{left:Math.min(100,s.target/max*100)+"%"}}/>
+                </div>
+                <span className="small num">{pct(s.curPct)} <span className="muted">/ {pct(s.target)}</span></span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MonthlyPlan({st}){
+  const [mode,setMode] = useState("cash");
+  const [includeCash,setIncludeCash] = useState(true);
+  const stockBudget = num(st.settings.monthlyBudget)*num(st.settings.sahmPct)/100;
+  const stakeBudget = num(st.settings.monthlyBudget)*num(st.settings.stakePct)/100;
+  const plan = useMemo(()=>monthlyPlan(st.holdings, stockBudget),[st.holdings,stockBudget]);
+  const extraCash = includeCash ? stockBudget : 0;
+  const reb  = useMemo(()=>rebalancePlan(st.holdings, extraCash),[st.holdings,extraCash]);
+  const noPrices = st.holdings.some(h=>num(h.price)<=0);
+
+  function exportCSV(){
+    const head = ["Ticker","Company","Sector","Target %","Current %","Action","Buy shares","Est. cost (SAR)","Price"];
+    const lines = plan.rows.filter(r=>r.buyShares>0).map(r=>
+      [r.ticker,`"${r.name}"`,r.sector,fmt(r.targetPct,1),fmt(r.curPct,1),"BUY",r.buyShares,fmt(r.cost,2),fmt(r.price,2)].join(","));
+    lines.push([`,,,,,STAKE (real estate),,${fmt(stakeBudget,2)},`].join(""));
+    download(`ksa-monthly-plan.csv`, head.join(",")+"\n"+lines.join("\n"), "text/csv");
+  }
+
+  return (
+    <div>
+      <div className="btn-row" style={{marginBottom:14}}>
+        <div className="seg">
+          <button className={mode==="cash"?"on":""} onClick={()=>setMode("cash")}>Add new cash (buy-only)</button>
+          <button className={mode==="rebalance"?"on":""} onClick={()=>setMode("rebalance")}>Rebalance (allow sells)</button>
+        </div>
+      </div>
+
+      {mode==="cash" ? (
+        <div>
+          <div className="grid cards">
+            <Stat label="This month → Sahm" value={fmt(stockBudget)} unit="SAR" foot="spread across equities below"/>
+            <Stat label="This month → Stake" value={fmt(stakeBudget)} unit="SAR" foot="single deposit, real-estate fund"/>
+            <Stat label="Equity to deploy" value={fmt(plan.spent)} unit="SAR" foot={`${sar(plan.leftover)} carry (whole-share rounding)`}/>
+          </div>
+          <section>
+            <div className="sec-head"><h2>Buy list — directs new cash to underweight names</h2>
+              <span className="grow"/>
+              <button className="btn" onClick={exportCSV}>Export CSV</button>
+            </div>
+            {noPrices && <div className="banner"><span>⚠</span><span>Some prices are 0 — set live prices in the <b>Holdings</b> tab so share counts compute.</span></div>}
+            <div className="tbl-wrap">
+              <table>
+                <thead><tr>
+                  <th>Stock</th><th>Sector</th><th>Target</th><th>Current</th>
+                  <th>Action</th><th>Buy (shares)</th><th>Est. cost</th>
+                </tr></thead>
+                <tbody>
+                  {plan.rows.map(r=>(
+                    <tr key={r.ticker}>
+                      <td><b>{r.ticker}</b> <span className="muted small">{r.name}</span></td>
+                      <td><span className="chip"><span className="dot" style={{background:SECTOR_HEX[r.sector]||"#888"}}/>{r.sector}</span></td>
+                      <td className="num">{pct(r.targetPct)}</td>
+                      <td className="num muted">{pct(r.curPct)}</td>
+                      <td><span className={"pill "+(r.buyShares>0?"buy":"hold")}>{r.buyShares>0?"BUY":"HOLD"}</span></td>
+                      <td className="num"><b>{r.buyShares>0?r.buyShares:"—"}</b></td>
+                      <td className="num">{r.buyShares>0?sar(r.cost,2):"—"}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td><b>STAKE</b> <span className="muted small">Real estate fund</span></td>
+                    <td><span className="chip"><span className="dot" style={{background:SECTOR_HEX["Real Estate"]}}/>Real Estate</span></td>
+                    <td className="num">—</td><td className="num muted">—</td>
+                    <td><span className="pill buy">DEPOSIT</span></td>
+                    <td className="num">—</td><td className="num">{sar(stakeBudget,2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="small muted" style={{marginTop:10}}>
+              Execute these manually in the Sahm app + Stake, then log them under <b>Holdings</b> so next month recalculates.
+              Order amounts ignore brokerage commission — keep a few SAR buffer.
+            </p>
+          </section>
+        </div>
+      ) : (
+        <div>
+          <div className="grid cards">
+            <Stat label="Sell proceeds" value={fmt(reb.sells)} unit="SAR" foot="cash raised by trims" footClass={reb.sells>0?"pos":""}/>
+            <Stat label="Buy cost" value={fmt(reb.buys)} unit="SAR" foot="into underweight / target names"/>
+            <Stat label="Net cash after" value={fmt(reb.netCash)} unit="SAR" foot={includeCash?`incl. ${sar(stockBudget)} new cash`:"sells − buys only"}/>
+          </div>
+          <section>
+            <div className="sec-head"><h2>Rebalance to target — buys &amp; sells</h2>
+              <span className="grow"/>
+              <label className="toggle"><input type="checkbox" checked={includeCash} onChange={e=>setIncludeCash(e.target.checked)}/> add this month's {fmt(stockBudget)} SAR</label>
+            </div>
+            <div className="banner"><span>⚠</span><span>Sells realise gains/losses and pay commission. This shows the trades to reach the <b>target %</b> you set in <b>Holdings</b> — lower a name's target to trim/exit it, raise others to rotate in.</span></div>
+            <div className="tbl-wrap">
+              <table>
+                <thead><tr>
+                  <th>Stock</th><th>Sector</th><th>Target</th><th>Current</th><th>Action</th><th>Shares</th><th>Trade value</th>
+                </tr></thead>
+                <tbody>
+                  {reb.rows.map(r=>(
+                    <tr key={r.ticker}>
+                      <td><b>{r.ticker}</b> <span className="muted small">{r.name}</span></td>
+                      <td><span className="chip"><span className="dot" style={{background:SECTOR_HEX[r.sector]||"#888"}}/>{r.sector}</span></td>
+                      <td className="num">{pct(r.targetPct)}</td>
+                      <td className="num muted">{pct(r.curPct)}</td>
+                      <td><span className={"pill "+(r.action==="BUY"?"buy":r.action==="SELL"?"sell":"hold")}>{r.action}</span></td>
+                      <td className={"num "+(r.action==="SELL"?"neg":r.action==="BUY"?"pos":"")}><b>{r.deltaShares>0?(r.action==="SELL"?"−":"+")+r.deltaShares:"—"}</b></td>
+                      <td className="num">{r.deltaShares>0?sar(r.tradeValue,2):"—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="small muted" style={{marginTop:10}}>
+              To rotate toward your income plan: lower the target % on names you want to exit (down to 0 to sell out completely) and add income names with <b>+ Add holding</b>, then set their targets. Keep your real-estate weight wherever you want it — this view just shows the trades to get there.
+            </p>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Holdings({st,update}){
+  const eq = equityValue(st.holdings);
+  function setH(i,key,val){
+    const holdings = st.holdings.map((h,j)=> j===i?{...h,[key]: key==="ticker"||key==="name"||key==="sector"?val:num(val)}:h);
+    update({...st, holdings});
+  }
+  function addRow(){
+    update({...st, holdings:[...st.holdings,{ticker:"",name:"New holding",sector:"Other",targetPct:0,price:0,shares:0,avgCost:0,yield:0}]});
+  }
+  function delRow(i){ update({...st, holdings: st.holdings.filter((_,j)=>j!==i)}); }
+  const totalTarget = st.holdings.reduce((a,h)=>a+num(h.targetPct),0);
+
+  return (
+    <div>
+      <div className="banner"><span>✎</span><span>Your source of truth. Update <b>price</b> and <b>shares</b> after each monthly buy; everything else recomputes. Target % is share of the <b>equity sleeve</b> (should sum to 100%).</span></div>
+      <div className="card" style={{marginBottom:14}}>
+        <div className="controls">
+          <div className="field"><label>Cash / buying power</label>
+            <input value={st.cash} onChange={e=>update({...st,cash:num(e.target.value)})}/></div>
+          <div className="field"><label>Real-estate value (Stake)</label>
+            <input value={st.stake.currentValue} onChange={e=>update({...st,stake:{...st.stake,currentValue:num(e.target.value)}})}/></div>
+          <div className="field"><label>Stake yield %</label>
+            <input value={st.stake.yield} onChange={e=>update({...st,stake:{...st.stake,yield:num(e.target.value)}})}/></div>
+          <div className="field"><label>Prices last updated</label>
+            <input placeholder="e.g. 2026-06-30" value={st.settings.pricesUpdated}
+              onChange={e=>update({...st,settings:{...st.settings,pricesUpdated:e.target.value}})}/></div>
+        </div>
+      </div>
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th>Ticker</th><th>Company</th><th>Sector</th><th>Target %</th>
+            <th>Avg cost</th><th>Price</th><th>Shares</th><th>Value</th><th>P/L</th><th>Yield %</th><th></th>
+          </tr></thead>
+          <tbody>
+            {st.holdings.map((h,i)=>(
+              <tr key={i}>
+                <td><input className="cell" style={{textAlign:"left",width:64}} value={h.ticker} onChange={e=>setH(i,"ticker",e.target.value)}/></td>
+                <td><input className="cell" style={{textAlign:"left",minWidth:130}} value={h.name} onChange={e=>setH(i,"name",e.target.value)}/></td>
+                <td>
+                  <select value={h.sector} onChange={e=>setH(i,"sector",e.target.value)} style={{minWidth:120}}>
+                    {ALL_SECTORS.map(s=><option key={s}>{s}</option>)}
+                  </select>
+                </td>
+                <td style={{width:72}}><input className="cell" value={h.targetPct} onChange={e=>setH(i,"targetPct",e.target.value)}/></td>
+                <td style={{width:72}}><input className="cell" value={h.avgCost} onChange={e=>setH(i,"avgCost",e.target.value)}/></td>
+                <td style={{width:72}}><input className="cell" value={h.price} onChange={e=>setH(i,"price",e.target.value)}/></td>
+                <td style={{width:62}}><input className="cell" value={h.shares} onChange={e=>setH(i,"shares",e.target.value)}/></td>
+                <td className="num">{sar(num(h.price)*num(h.shares))}</td>
+                <td className={"num "+(num(h.avgCost)>0?(holdingPL(h)>=0?"pos":"neg"):"")}>
+                  {num(h.avgCost)>0 ? (holdingPL(h)>=0?"+":"")+fmt(holdingPL(h),2) : "—"}
+                </td>
+                <td style={{width:62}}><input className="cell" value={h.yield} onChange={e=>setH(i,"yield",e.target.value)}/></td>
+                <td><button className="icon-btn" title="Remove" onClick={()=>delRow(i)}>✕</button></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={3}><b>Totals</b></td>
+              <td className="num"><b className={Math.abs(totalTarget-100)>0.5?"neg":"pos"}>{pct(totalTarget)}</b></td>
+              <td></td><td></td><td></td>
+              <td className="num"><b>{sar(eq)}</b></td>
+              <td className={"num "+(portfolioPL(st.holdings)>=0?"pos":"neg")}><b>{(portfolioPL(st.holdings)>=0?"+":"")+fmt(portfolioPL(st.holdings),2)}</b></td>
+              <td className="num"><b>{pct(weightedEquityYield(st.holdings))}</b></td><td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div className="btn-row" style={{marginTop:12}}>
+        <button className="btn" onClick={addRow}>+ Add holding</button>
+        {Math.abs(totalTarget-100)>0.5 && <span className="small neg">Target weights sum to {pct(totalTarget)} — adjust to 100%.</span>}
+      </div>
+    </div>
+  );
+}
+
+function Income({st,update}){
+  const proj = useMemo(()=>projectIncome(st),[st]);
+  return (
+    <div>
+      <div className="card" style={{marginBottom:14}}>
+        <div className="controls">
+          <div className="field"><label>Monthly budget (SAR)</label>
+            <input value={st.settings.monthlyBudget} onChange={e=>update({...st,settings:{...st.settings,monthlyBudget:num(e.target.value)}})}/></div>
+          <div className="field"><label>Sahm split %</label>
+            <input value={st.settings.sahmPct} onChange={e=>{const v=num(e.target.value);update({...st,settings:{...st.settings,sahmPct:v,stakePct:100-v}})}}/></div>
+          <div className="field"><label>Stake split %</label>
+            <input value={st.settings.stakePct} onChange={e=>{const v=num(e.target.value);update({...st,settings:{...st.settings,stakePct:v,sahmPct:100-v}})}}/></div>
+          <div className="field"><label>Projection years</label>
+            <input value={st.settings.years} onChange={e=>update({...st,settings:{...st.settings,years:num(e.target.value)}})}/></div>
+        </div>
+        <label className="toggle" style={{marginTop:12}}>
+          <input type="checkbox" checked={!!st.settings.reinvest} onChange={e=>update({...st,settings:{...st.settings,reinvest:e.target.checked}})}/>
+          Reinvest income (compound)
+        </label>
+      </div>
+
+      <div className="grid cards" style={{marginBottom:6}}>
+        <Stat label="Equity blended yield" value={pct(proj.eqYield)} foot="weighted by target %"/>
+        <Stat label="Real-estate yield" value={pct(proj.reYield)} foot="Stake fund"/>
+      </div>
+
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr><th>Year</th><th>Cumulative invested</th><th>Portfolio value</th><th>Annual income</th><th>Monthly income</th></tr></thead>
+          <tbody>
+            {proj.rows.map(r=>(
+              <tr key={r.year}>
+                <td><b>Year {r.year}</b></td>
+                <td className="num">{sar(r.invested)}</td>
+                <td className="num">{sar(r.value)}</td>
+                <td className="num pos"><b>{sar(r.annualIncome)}</b></td>
+                <td className="num">{sar(r.monthlyIncome)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="small muted" style={{marginTop:10}}>
+        Income = dividends + rental yield only; <b>excludes</b> share-price gains/losses. "Monthly income" is the year-end run rate.
+        Figures follow your inputs above — they are a model, not a guarantee.
+      </p>
+    </div>
+  );
+}
+
+function Logs({st,update}){
+  const blankTx = {date:"",ticker:"",action:"BUY",qty:"",price:"",commission:"",note:""};
+  const blankDv = {date:"",ticker:"",perShare:"",shares:"",note:""};
+  const [tx,setTx] = useState(blankTx);
+  const [dv,setDv] = useState(blankDv);
+
+  function addTx(){
+    if(!tx.ticker) return;
+    const rec = {...tx, qty:num(tx.qty), price:num(tx.price), commission:num(tx.commission),
+      total:num(tx.qty)*num(tx.price)+num(tx.commission)};
+    update({...st, transactions:[rec, ...st.transactions]});
+    setTx(blankTx);
+  }
+  function addDv(){
+    if(!dv.ticker) return;
+    const rec = {...dv, perShare:num(dv.perShare), shares:num(dv.shares), total:num(dv.perShare)*num(dv.shares)};
+    update({...st, dividends:[rec, ...st.dividends]});
+    setDv(blankDv);
+  }
+  const delTx = i => update({...st, transactions: st.transactions.filter((_,j)=>j!==i)});
+  const delDv = i => update({...st, dividends: st.dividends.filter((_,j)=>j!==i)});
+  const ytdDiv = st.dividends.reduce((a,d)=>a+num(d.total),0);
+
+  return (
+    <div>
+      <section style={{marginTop:0}}>
+        <div className="sec-head"><h2>Trade log</h2></div>
+        <div className="card" style={{marginBottom:12}}>
+          <div className="controls">
+            <div className="field"><label>Date</label><input placeholder="2026-06-30" value={tx.date} onChange={e=>setTx({...tx,date:e.target.value})}/></div>
+            <div className="field"><label>Ticker</label><input value={tx.ticker} onChange={e=>setTx({...tx,ticker:e.target.value})}/></div>
+            <div className="field"><label>Action</label><select value={tx.action} onChange={e=>setTx({...tx,action:e.target.value})}><option>BUY</option><option>SELL</option></select></div>
+            <div className="field"><label>Qty</label><input value={tx.qty} onChange={e=>setTx({...tx,qty:e.target.value})}/></div>
+            <div className="field"><label>Price</label><input value={tx.price} onChange={e=>setTx({...tx,price:e.target.value})}/></div>
+            <div className="field"><label>Commission</label><input value={tx.commission} onChange={e=>setTx({...tx,commission:e.target.value})}/></div>
+          </div>
+          <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addTx}>Add trade</button></div>
+        </div>
+        {st.transactions.length? (
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>Date</th><th>Ticker</th><th>Action</th><th>Qty</th><th>Price</th><th>Total</th><th></th></tr></thead>
+            <tbody>{st.transactions.map((t,i)=>(
+              <tr key={i}><td>{t.date||"—"}</td><td><b>{t.ticker}</b></td><td>{t.action}</td>
+                <td className="num">{fmt(t.qty)}</td><td className="num">{sar(t.price,2)}</td><td className="num">{sar(t.total,2)}</td>
+                <td><button className="icon-btn" onClick={()=>delTx(i)}>✕</button></td></tr>
+            ))}</tbody>
+          </table></div>
+        ):<div className="card empty">No trades logged yet.</div>}
+      </section>
+
+      <section>
+        <div className="sec-head"><h2>Dividend log</h2><span className="hint">YTD collected: {sar(ytdDiv,2)}</span></div>
+        <div className="card" style={{marginBottom:12}}>
+          <div className="controls">
+            <div className="field"><label>Date</label><input placeholder="2026-06-30" value={dv.date} onChange={e=>setDv({...dv,date:e.target.value})}/></div>
+            <div className="field"><label>Ticker</label><input value={dv.ticker} onChange={e=>setDv({...dv,ticker:e.target.value})}/></div>
+            <div className="field"><label>Per share</label><input value={dv.perShare} onChange={e=>setDv({...dv,perShare:e.target.value})}/></div>
+            <div className="field"><label>Shares held</label><input value={dv.shares} onChange={e=>setDv({...dv,shares:e.target.value})}/></div>
+          </div>
+          <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addDv}>Add dividend</button></div>
+        </div>
+        {st.dividends.length? (
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>Date</th><th>Ticker</th><th>Per share</th><th>Shares</th><th>Total</th><th></th></tr></thead>
+            <tbody>{st.dividends.map((d,i)=>(
+              <tr key={i}><td>{d.date||"—"}</td><td><b>{d.ticker}</b></td>
+                <td className="num">{sar(d.perShare,2)}</td><td className="num">{fmt(d.shares)}</td><td className="num pos">{sar(d.total,2)}</td>
+                <td><button className="icon-btn" onClick={()=>delDv(i)}>✕</button></td></tr>
+            ))}</tbody>
+          </table></div>
+        ):<div className="card empty">No dividends logged yet.</div>}
+      </section>
+    </div>
+  );
+}
+
+/* ----------------------------- app ---------------------------------- */
+function CloudChip({cloud,onConnect,onDisconnect}){
+  const {status,email,last,msg} = cloud;
+  if(status==="on"){
+    const t = last ? new Date(last).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}) : "";
+    return <span className="cloud on" title={email+(t?" · last sync "+t:"")} onClick={onDisconnect}>
+      <span className="dotc"/>Synced{email?" · "+email.split("@")[0]:""}</span>;
+  }
+  if(status==="signing") return <span className="cloud" title="Connecting to Google Drive">Connecting…</span>;
+  if(status==="error") return <span className="cloud err" title={msg} onClick={onConnect}>⚠ Sync error — retry</span>;
+  return <span className="cloud" title="Sync your data across phone & laptop via Google Drive" onClick={onConnect}>☁ Connect Drive</span>;
+}
+
+function App(){
+  const [st,setSt] = useState(loadState);
+  const [tab,setTab] = useState("dashboard");
+  const [cloud,setCloud] = useState({status: cloudConfigured()?"off":"unset", email:"", fileId:"", last:0, msg:""});
+  const fileRef = useRef();
+  const pushTimer = useRef();
+
+  useEffect(()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(st)); }catch(e){} },[st]);
+
+  // push local changes up to Drive (debounced) once connected
+  useEffect(()=>{
+    if(cloud.status!=="on" || !cloud.fileId) return;
+    clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(()=>{
+      driveWrite(cloud.fileId, {...st, updatedAt: Date.now()})
+        .then(()=> setCloud(c=>({...c, last: Date.now(), msg:""})))
+        .catch(e=> setCloud(c=>({...c, status:"error", msg:(e&&e.message)||"sync failed"})));
+    }, 1500);
+    return ()=> clearTimeout(pushTimer.current);
+  },[st, cloud.status, cloud.fileId]);
+
+  async function cloudConnect(){
+    let cid = getClientId();
+    if(!cid){
+      cid = (window.prompt("Paste your Google OAuth Client ID (one-time — see SETUP.md):","")||"").trim();
+      if(!cid) return;
+      localStorage.setItem(GCID_KEY, cid); _tokenClient=null;
+    }
+    setCloud(c=>({...c, status:"signing", msg:""}));
+    try{
+      await getToken();
+      const email = await driveWhoAmI();
+      const found = await driveFind();
+      let fileId;
+      if(found){ fileId = found.id; setSt(mergeState(await driveRead(fileId))); }   // remote wins on connect
+      else { fileId = await driveCreate({...st, updatedAt: Date.now()}); }           // first device seeds it
+      setCloud({status:"on", email, fileId, last: Date.now(), msg:""});
+    }catch(e){ setCloud(c=>({...c, status:"error", msg:(e&&e.message)||"could not connect"})); }
+  }
+  function cloudDisconnect(){ _accessToken=""; setCloud({status: cloudConfigured()?"off":"unset", email:"", fileId:"", last:0, msg:""}); }
+
+  function exportJSON(){ download("ksa-portfolio-backup.json", JSON.stringify(st,null,2), "application/json"); }
+  function importJSON(e){
+    const f = e.target.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = ()=>{ try{ setSt(mergeState(JSON.parse(r.result))); }catch(err){ alert("Could not read that file."); } };
+    r.readAsText(f); e.target.value="";
+  }
+  function reset(){ if(confirm("Reset to default seed data? Your logged trades and edits will be lost.")) setSt(DEFAULT_STATE); }
+
+  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["income","Income"],["logs","Logs"]];
+
+  return (
+    <div className="wrap">
+      <header className="top">
+        <div className="logo">ع</div>
+        <div className="title">
+          <h1>KSA Passive Income Dashboard</h1>
+          <div className="sub">Tadawul dividends + Stake real estate · manual rebalancing tracker</div>
+        </div>
+        <span className="grow"/>
+        <div className="btn-row">
+          <CloudChip cloud={cloud} onConnect={cloudConnect} onDisconnect={cloudDisconnect}/>
+          <button className="btn ghost" onClick={()=>fileRef.current.click()}>Import</button>
+          <button className="btn ghost" onClick={exportJSON}>Backup</button>
+          <input ref={fileRef} type="file" accept="application/json" onChange={importJSON} style={{display:"none"}}/>
+        </div>
+      </header>
+
+      <div className="banner">
+        <span>↻</span>
+        <span><b>Loaded from your Sahm account.</b> Refresh prices in <b>Holdings</b> before each monthly plan, and set each stock's dividend yield for income projections (they default to 0).
+        Tracks your plan and math — not investment advice.{st.settings.pricesUpdated?` Prices set: ${st.settings.pricesUpdated}.`:""}</span>
+      </div>
+
+      <nav className="tabs">
+        {tabs.map(([k,label])=>(
+          <button key={k} className={"tab"+(tab===k?" active":"")} onClick={()=>setTab(k)}>{label}</button>
+        ))}
+      </nav>
+
+      {tab==="dashboard" && <Dashboard st={st}/>}
+      {tab==="plan" && <MonthlyPlan st={st}/>}
+      {tab==="holdings" && <Holdings st={st} update={setSt}/>}
+      {tab==="income" && <Income st={st} update={setSt}/>}
+      {tab==="logs" && <Logs st={st} update={setSt}/>}
+
+      <footer>
+        <div className="btn-row">
+          <button className="btn ghost small" onClick={reset}>Reset to seed data</button>
+        </div>
+        <ul>
+          <li>Data lives in this browser (localStorage). <b>Connect Drive</b> (top-right) syncs it across phone &amp; laptop via your Google account; <b>Backup</b> exports a JSON copy anytime.</li>
+          <li>Tax note: as a Saudi-resident individual, Tadawul dividends are generally not subject to personal income tax or withholding (the 5% WHT applies to non-resident shareholders). Zakat may apply to wealth — confirm with a specialist.</li>
+          <li>The Monthly plan has two modes: <b>add new cash</b> (buy-only, minimises commission) and <b>rebalance</b> (buy + sell to hit the target weights you set in Holdings).</li>
+        </ul>
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
