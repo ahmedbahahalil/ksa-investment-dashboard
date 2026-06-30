@@ -204,6 +204,19 @@ const GCID_KEY        = "ksa-google-client-id";
 const getClientId = () => (localStorage.getItem(GCID_KEY) || "").trim();
 const cloudConfigured = () => getClientId().length > 0;
 
+// Live prices: the dashboard GETs your Apps Script web app (it fetches Yahoo server-side,
+// dodging browser CORS) and returns { prices:{ticker:price}, asOf }. See SETUP.md.
+const PRICES_URL_KEY = "ksa-prices-url";
+const getPricesUrl = () => (localStorage.getItem(PRICES_URL_KEY) || "").trim();
+async function fetchLivePrices(tickers){
+  const url = getPricesUrl();
+  if(!url || !tickers.length) return null;
+  const u = url + (url.includes("?")?"&":"?") + "tickers=" + encodeURIComponent(tickers.join(","));
+  const r = await fetch(u);
+  if(!r.ok) throw new Error("price fetch "+r.status);
+  return await r.json();
+}
+
 let _tokenClient=null, _tokenClientId="", _accessToken="", _tokenExp=0;
 const gisReady = () => !!(window.google && google.accounts && google.accounts.oauth2);
 function tokenClient(){
@@ -840,10 +853,12 @@ function App(){
   const [st,setSt] = useState(loadState);
   const [tab,setTab] = useState("dashboard");
   const [cloud,setCloud] = useState({status: cloudConfigured()?"off":"unset", email:"", fileId:"", last:0, msg:""});
+  const [priceState,setPriceState] = useState("");
   const fileRef = useRef();
   const pushTimer = useRef();
 
   useEffect(()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(st)); }catch(e){} },[st]);
+  useEffect(()=>{ if(getPricesUrl()) refreshPricesNow(true); },[]);   // fetch-on-open
 
   // push local changes up to Drive (debounced) once connected
   useEffect(()=>{
@@ -877,6 +892,26 @@ function App(){
   }
   function cloudDisconnect(){ _accessToken=""; setCloud({status: cloudConfigured()?"off":"unset", email:"", fileId:"", last:0, msg:""}); }
 
+  async function refreshPricesNow(auto){
+    let url = getPricesUrl();
+    if(!url){
+      if(auto) return;
+      url = (window.prompt("Paste your price web-app URL (one-time — see SETUP.md):","")||"").trim();
+      if(!url) return; localStorage.setItem(PRICES_URL_KEY, url);
+    }
+    const tickers = st.holdings.map(h=>h.ticker).filter(Boolean);
+    if(!tickers.length) return;
+    setPriceState("busy");
+    try{
+      const data = await fetchLivePrices(tickers);
+      const prices = (data && data.prices) || {};
+      let n=0;
+      const holdings = st.holdings.map(h=>{ const p=num(prices[h.ticker]); if(p>0){ n++; return {...h, price:p}; } return h; });
+      if(n>0) setSt({...st, holdings, settings:{...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"}});
+      setPriceState(n>0 ? "" : "no prices returned");
+    }catch(e){ setPriceState("couldn't reach price source"); }
+  }
+
   function exportJSON(){ download("ksa-portfolio-backup.json", JSON.stringify(st,null,2), "application/json"); }
   function importJSON(e){
     const f = e.target.files[0]; if(!f) return;
@@ -898,6 +933,7 @@ function App(){
         </div>
         <span className="grow"/>
         <div className="btn-row">
+          <button className="btn ghost" onClick={()=>refreshPricesNow(false)} title={priceState && priceState!=="busy" ? priceState : "Fetch live prices now (also runs automatically when you open the app)"}>{priceState==="busy" ? "Refreshing…" : "↻ Prices"}</button>
           <CloudChip cloud={cloud} onConnect={cloudConnect} onDisconnect={cloudDisconnect}/>
           <button className="btn ghost" onClick={()=>fileRef.current.click()}>Import</button>
           <button className="btn ghost" onClick={exportJSON}>Backup</button>

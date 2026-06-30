@@ -58,6 +58,19 @@ It then runs daily ~16:00 Riyadh — about an hour after the 15:00 Tadawul close
 
 ---
 
+## Part 4 — Live prices on open (optional)
+
+This makes the dashboard fetch **current** prices each time you open it (and via the **↻ Prices** button), on top of the daily close. It reuses the **same** Apps Script as a tiny price endpoint, so the browser never has to call Yahoo directly (which it can't, due to CORS).
+
+1. In the same Apps Script project → **Deploy → New deployment**.
+2. Click the gear → select type **Web app**.
+3. Set **Execute as: Me**, **Who has access: Anyone** → **Deploy** → authorize → copy the **Web app URL** (ends in `/exec`).
+4. In the dashboard → **↻ Prices** → paste that URL. It fetches immediately and then automatically every time you open the app.
+
+> "Anyone" is safe here — the endpoint returns **only prices** (public market data), never your portfolio. During market hours it returns the live price; after close, the closing price.
+
+---
+
 ## Troubleshooting
 
 - **"Connect Drive" does nothing / popup blocked** → allow popups for the site, click again.

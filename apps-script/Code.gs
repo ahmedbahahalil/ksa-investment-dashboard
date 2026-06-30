@@ -41,6 +41,23 @@ function refreshPrices() {
   Logger.log("Done — updated " + updated + " of " + holdings.length + " prices.");
 }
 
+/**
+ * Live-price endpoint for the dashboard's "fetch-on-open".
+ * Deploy this script as a Web App (Execute as: Me, Who has access: Anyone) and
+ * paste the URL into the dashboard. Returns ONLY public prices — no portfolio data —
+ * so it's safe to expose. The browser can't fetch Yahoo directly (CORS); this can.
+ *   GET <webapp-url>?tickers=4009,1303,4220,4327
+ *   → { "prices": {"4009":31.86, ...}, "asOf": "2026-06-30 14:32" }
+ */
+function doGet(e) {
+  var tickers = ((e && e.parameter && e.parameter.tickers) || "")
+    .split(",").map(function (s) { return s.trim(); }).filter(String);
+  var prices = {};
+  tickers.forEach(function (t) { var p = fetchPrice_(t); if (p > 0) prices[t] = p; });
+  var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
 function fetchPrice_(ticker) {
   try {
     var url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + ".SR";
