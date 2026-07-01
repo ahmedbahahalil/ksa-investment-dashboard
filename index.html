@@ -796,10 +796,25 @@ function Logs({st,update}){
   const [dv,setDv] = useState(blankDv);
 
   function addTx(){
-    if(!tx.ticker) return;
-    const rec = {...tx, qty:num(tx.qty), price:num(tx.price), commission:num(tx.commission),
-      total:num(tx.qty)*num(tx.price)+num(tx.commission)};
-    update({...st, transactions:[rec, ...st.transactions]});
+    const ticker = (tx.ticker||"").trim();
+    if(!ticker) return;
+    const qty = num(tx.qty), price = num(tx.price), commission = num(tx.commission);
+    const rec = {...tx, ticker, qty, price, commission, total: qty*price + commission};
+    // apply the trade to Holdings: shares +/- and weighted average cost on buys
+    let holdings = st.holdings.slice();
+    const i = holdings.findIndex(h => (h.ticker||"").trim() === ticker);
+    if(i >= 0){
+      const h = holdings[i], s0 = num(h.shares), a0 = num(h.avgCost);
+      if(tx.action === "SELL"){
+        holdings[i] = {...h, shares: Math.max(0, s0 - qty)};       // realised P/L not tracked; avg cost unchanged
+      } else {
+        const s1 = s0 + qty;
+        holdings[i] = {...h, shares: s1, avgCost: s1>0 ? (s0*a0 + qty*price + commission)/s1 : 0};
+      }
+    } else if(tx.action === "BUY"){
+      holdings.push({ticker, name:"", sector:"Other", targetPct:0, price, shares:qty, avgCost: qty>0 ? (qty*price+commission)/qty : price, yield:0});
+    }
+    update({...st, holdings, transactions:[rec, ...st.transactions]});
     setTx(blankTx);
   }
   function addDv(){
@@ -815,7 +830,7 @@ function Logs({st,update}){
   return (
     <div>
       <section style={{marginTop:0}}>
-        <div className="sec-head"><h2>Trade log</h2></div>
+        <div className="sec-head"><h2>Trade log</h2><span className="hint">a logged trade updates that stock's shares &amp; avg cost in Holdings</span></div>
         <div className="card" style={{marginBottom:12}}>
           <div className="controls">
             <div className="field"><label>Date</label><input placeholder="2026-06-30" value={tx.date} onChange={e=>setTx({...tx,date:e.target.value})}/></div>
