@@ -166,6 +166,7 @@ const DEFAULT_STATE = {
   holdings: DEFAULT_HOLDINGS.map(h=>({...h})),
   transactions:[],
   dividends:[],
+  watchlist:[],
 };
 
 /* ----------------------------- helpers ------------------------------ */
@@ -185,6 +186,7 @@ function mergeState(s){
     holdings: Array.isArray(s.holdings)&&s.holdings.length ? s.holdings : DEFAULT_STATE.holdings,
     transactions: s.transactions||[],
     dividends: s.dividends||[],
+    watchlist: s.watchlist||[],
   };
 }
 function loadState(){
@@ -837,6 +839,77 @@ function Logs({st,update}){
 }
 
 /* ----------------------------- app ---------------------------------- */
+function Watchlist({st,update}){
+  const wl = st.watchlist || [];
+  function setW(i,key,val){
+    const watchlist = wl.map((w,j)=> j===i ? {...w,[key]: (key==="ticker"||key==="name"||key==="sector")?val:num(val)} : w);
+    update({...st, watchlist});
+  }
+  function addRow(){ update({...st, watchlist:[...wl, {ticker:"", name:"", sector:"Other", price:0, yield:0}]}); }
+  function delRow(i){ update({...st, watchlist: wl.filter((_,j)=>j!==i)}); }
+  const blended = weightedEquityYield(st.holdings);
+
+  return (
+    <div>
+      <div className="banner"><span>ⓘ</span><span><b>Candidates you're researching.</b> Shows public data for tickers <b>you</b> add — it is <b>not</b> a recommendation or a suggestion to buy. Price auto-updates via <b>↻ Prices</b> (top-right); enter each dividend yield yourself from Argaam / Tadawul.</span></div>
+
+      <div className="grid cards" style={{marginBottom:14}}>
+        <Stat label="Your equity blended yield" value={pct(blended)} foot="benchmark — what you already earn"/>
+        <Stat label="Stake fund yield" value={pct(num(st.stake.yield))} foot="your real-estate sleeve"/>
+      </div>
+
+      {wl.length ? (
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Ticker</th><th>Company</th><th>Sector</th><th>Price</th><th>Yield %</th><th>Div / share</th><th></th>
+            </tr></thead>
+            <tbody>
+              {wl.map((w,i)=>(
+                <tr key={i}>
+                  <td><input className="cell" style={{textAlign:"left",width:70}} value={w.ticker} onChange={e=>setW(i,"ticker",e.target.value)}/></td>
+                  <td><input className="cell" style={{textAlign:"left",minWidth:130}} placeholder="name" value={w.name} onChange={e=>setW(i,"name",e.target.value)}/></td>
+                  <td><select value={w.sector} onChange={e=>setW(i,"sector",e.target.value)} style={{minWidth:120}}>{ALL_SECTORS.map(s=><option key={s}>{s}</option>)}</select></td>
+                  <td className="num">{num(w.price)>0 ? sar(w.price,2) : "—"}</td>
+                  <td style={{width:80}}><input className="cell" value={w.yield} onChange={e=>setW(i,"yield",e.target.value)}/></td>
+                  <td className="num">{num(w.price)>0 && num(w.yield)>0 ? sar(num(w.price)*num(w.yield)/100,2) : "—"}</td>
+                  <td><button className="icon-btn" title="Remove" onClick={()=>delRow(i)}>✕</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <div className="card empty">No candidates yet — add a ticker you're considering, then hit ↻ Prices.</div>}
+
+      <div className="btn-row" style={{marginTop:12}}>
+        <button className="btn" onClick={addRow}>+ Add candidate</button>
+      </div>
+
+      <section>
+        <div className="sec-head"><h2>For comparison — what you own</h2><span className="hint">your current holdings</span></div>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Ticker</th><th>Company</th><th>Sector</th><th>Price</th><th>Yield %</th></tr></thead>
+            <tbody>
+              {st.holdings.map((h,i)=>(
+                <tr key={i}>
+                  <td><b>{h.ticker}</b></td>
+                  <td className="muted">{h.name}</td>
+                  <td><span className="chip"><span className="dot" style={{background:SECTOR_HEX[h.sector]||"#888"}}/>{h.sector}</span></td>
+                  <td className="num">{sar(num(h.price),2)}</td>
+                  <td className="num">{pct(num(h.yield))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p className="small muted" style={{marginTop:10}}>Data only — do your own research (Argaam, Tadawul filings) or consult a licensed advisor before buying. To actually hold a candidate, add it in <b>Holdings</b>.</p>
+    </div>
+  );
+}
+
 function CloudChip({cloud,onConnect,onDisconnect}){
   const {status,email,last,msg} = cloud;
   if(status==="on"){
@@ -899,7 +972,8 @@ function App(){
       url = (window.prompt("Paste your price web-app URL (one-time — see SETUP.md):","")||"").trim();
       if(!url) return; localStorage.setItem(PRICES_URL_KEY, url);
     }
-    const tickers = st.holdings.map(h=>h.ticker).filter(Boolean);
+    const wl = st.watchlist||[];
+    const tickers = [...new Set([...st.holdings.map(h=>h.ticker), ...wl.map(w=>w.ticker)].filter(Boolean))];
     if(!tickers.length) return;
     setPriceState("busy");
     try{
@@ -907,7 +981,8 @@ function App(){
       const prices = (data && data.prices) || {};
       let n=0;
       const holdings = st.holdings.map(h=>{ const p=num(prices[h.ticker]); if(p>0){ n++; return {...h, price:p}; } return h; });
-      if(n>0) setSt({...st, holdings, settings:{...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"}});
+      const watchlist = wl.map(w=>{ const p=num(prices[w.ticker]); if(p>0){ n++; return {...w, price:p}; } return w; });
+      if(n>0) setSt({...st, holdings, watchlist, settings:{...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"}});
       setPriceState(n>0 ? "" : "no prices returned");
     }catch(e){ setPriceState("couldn't reach price source"); }
   }
@@ -921,7 +996,7 @@ function App(){
   }
   function reset(){ if(confirm("Reset to default seed data? Your logged trades and edits will be lost.")) setSt(DEFAULT_STATE); }
 
-  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["income","Income"],["logs","Logs"]];
+  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["watchlist","Watchlist"],["income","Income"],["logs","Logs"]];
 
   return (
     <div className="wrap">
@@ -956,6 +1031,7 @@ function App(){
       {tab==="dashboard" && <Dashboard st={st}/>}
       {tab==="plan" && <MonthlyPlan st={st}/>}
       {tab==="holdings" && <Holdings st={st} update={setSt}/>}
+      {tab==="watchlist" && <Watchlist st={st} update={setSt}/>}
       {tab==="income" && <Income st={st} update={setSt}/>}
       {tab==="logs" && <Logs st={st} update={setSt}/>}
 
