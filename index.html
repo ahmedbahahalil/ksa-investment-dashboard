@@ -159,6 +159,22 @@ const DEFAULT_HOLDINGS = [
   {ticker:"4327", name:"Alramz Real Estate",    sector:"Real Estate", targetPct:37, price:55.80, shares:4,  avgCost:54.40, yield:2.9},
 ];
 
+// The dividend-income names from the original strategy doc — offered as Watchlist candidates.
+const PLAN_CANDIDATES = [
+  {ticker:"1120", name:"Al Rajhi Bank",       sector:"Banking"},
+  {ticker:"1010", name:"Riyad Bank",          sector:"Banking"},
+  {ticker:"1180", name:"Saudi National Bank", sector:"Banking"},
+  {ticker:"1030", name:"SABB",                sector:"Banking"},
+  {ticker:"2222", name:"Saudi Aramco",        sector:"Energy"},
+  {ticker:"2010", name:"SABIC",               sector:"Materials"},
+  {ticker:"2060", name:"Saudi Electricity",   sector:"Utilities"},
+  {ticker:"2087", name:"ACWA Power",          sector:"Utilities"},
+  {ticker:"7010", name:"STC",                 sector:"Telecoms"},
+  {ticker:"7020", name:"Mobily",              sector:"Telecoms"},
+  {ticker:"4012", name:"Alkhorayef Water",    sector:"Industrials"},
+  {ticker:"4081", name:"Jarir Marketing",     sector:"Consumer"},
+];
+
 const DEFAULT_STATE = {
   settings:{ monthlyBudget:1000, stakePct:35, sahmPct:65, reinvest:true, years:5, pricesUpdated:"2026-06-30 (Sahm)" },
   cash:23.84,
@@ -847,6 +863,11 @@ function Watchlist({st,update}){
   }
   function addRow(){ update({...st, watchlist:[...wl, {ticker:"", name:"", sector:"Other", price:0, yield:0}]}); }
   function delRow(i){ update({...st, watchlist: wl.filter((_,j)=>j!==i)}); }
+  function addPlanCandidates(){
+    const have = new Set(wl.map(w=>w.ticker));
+    const add = PLAN_CANDIDATES.filter(c=>!have.has(c.ticker)).map(c=>({...c, price:0, yield:0}));
+    if(add.length) update({...st, watchlist:[...wl, ...add]});
+  }
   const blended = weightedEquityYield(st.holdings);
 
   return (
@@ -883,6 +904,7 @@ function Watchlist({st,update}){
 
       <div className="btn-row" style={{marginTop:12}}>
         <button className="btn" onClick={addRow}>+ Add candidate</button>
+        <button className="btn" onClick={addPlanCandidates} title="Adds the dividend names from your original strategy doc (banks, telecoms, energy…)">+ Add income-plan names</button>
       </div>
 
       <section>
