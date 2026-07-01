@@ -799,6 +799,7 @@ function Logs({st,update}){
     const ticker = (tx.ticker||"").trim();
     if(!ticker) return;
     const qty = num(tx.qty), price = num(tx.price), commission = num(tx.commission);
+    const round2 = n => Math.round(n*100)/100;
     const rec = {...tx, ticker, qty, price, commission, total: qty*price + commission};
     // apply the trade to Holdings: shares +/- and weighted average cost on buys
     let holdings = st.holdings.slice();
@@ -809,12 +810,14 @@ function Logs({st,update}){
         holdings[i] = {...h, shares: Math.max(0, s0 - qty)};       // realised P/L not tracked; avg cost unchanged
       } else {
         const s1 = s0 + qty;
-        holdings[i] = {...h, shares: s1, avgCost: s1>0 ? (s0*a0 + qty*price + commission)/s1 : 0};
+        holdings[i] = {...h, shares: s1, avgCost: s1>0 ? round2((s0*a0 + qty*price + commission)/s1) : 0};
       }
     } else if(tx.action === "BUY"){
-      holdings.push({ticker, name:"", sector:"Other", targetPct:0, price, shares:qty, avgCost: qty>0 ? (qty*price+commission)/qty : price, yield:0});
+      holdings.push({ticker, name:"", sector:"Other", targetPct:0, price, shares:qty, avgCost: qty>0 ? round2((qty*price+commission)/qty) : price, yield:0});
     }
-    update({...st, holdings, transactions:[rec, ...st.transactions]});
+    // cash at hand: a buy spends cash, a sell adds proceeds (both net of commission)
+    const cashDelta = tx.action === "SELL" ? (qty*price - commission) : -(qty*price + commission);
+    update({...st, cash: round2(num(st.cash) + cashDelta), holdings, transactions:[rec, ...st.transactions]});
     setTx(blankTx);
   }
   function addDv(){
