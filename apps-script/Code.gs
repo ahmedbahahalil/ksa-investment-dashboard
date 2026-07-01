@@ -55,7 +55,14 @@ function doGet(e) {
   var prices = {};
   tickers.forEach(function (t) { var p = fetchPrice_(t); if (p > 0) prices[t] = p; });
   var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
-  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+  var json = JSON.stringify(out);
+  // JSONP: Apps Script sends no CORS headers, so the dashboard loads this via a <script> tag
+  // and passes ?callback=fn. Wrap the JSON in that call. (Plain ?tickers=… still returns JSON.)
+  var cb = e && e.parameter && e.parameter.callback;
+  if (cb) {
+    return ContentService.createTextOutput(cb + "(" + json + ")").setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
 }
 
 function fetchPrice_(ticker) {

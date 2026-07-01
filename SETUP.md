@@ -77,4 +77,5 @@ This makes the dashboard fetch **current** prices each time you open it (and via
 - **`redirect_uri_mismatch` / `origin` error** → the page's origin isn't in *Authorized JavaScript origins*. Re-check Part 1 step 4 (origin is scheme + host only, no path).
 - **Sign-in blocked for your account** → the consent screen must be **Internal** and you must sign in with a Workspace-org account.
 - **Prices not updating** → run `refreshPrices` manually and read the Execution log; confirm `ksa-portfolio.json` exists in your Drive (it's created the first time you Connect Drive).
+- **↻ Prices says "couldn't reach price source"** even though `‹web-app-url›?tickers=1120` shows JSON in a browser tab → that's CORS. The dashboard loads prices via JSONP (`&callback=`), so your `Code.gs` must be the current version **and** redeployed: **Deploy → Manage deployments → ✏️ (edit) → Version: New version → Deploy** (this keeps the same `/exec` URL). Then hard-refresh the dashboard.
 - **Move data to a personal account later** → just **Backup** the JSON and **Import** it after connecting the other account. You're never locked in.

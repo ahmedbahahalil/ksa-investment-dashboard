@@ -226,13 +226,24 @@ const cloudConfigured = () => getClientId().length > 0;
 // dodging browser CORS) and returns { prices:{ticker:price}, asOf }. See SETUP.md.
 const PRICES_URL_KEY = "ksa-prices-url";
 const getPricesUrl = () => (localStorage.getItem(PRICES_URL_KEY) || "").trim();
-async function fetchLivePrices(tickers){
+// Apps Script web apps don't send CORS headers, so a cross-origin fetch() is blocked.
+// JSONP (load via a <script> tag) sidesteps CORS entirely — the script calls our callback.
+let _jsonpN = 0;
+function fetchLivePrices(tickers){
   const url = getPricesUrl();
-  if(!url || !tickers.length) return null;
-  const u = url + (url.includes("?")?"&":"?") + "tickers=" + encodeURIComponent(tickers.join(","));
-  const r = await fetch(u);
-  if(!r.ok) throw new Error("price fetch "+r.status);
-  return await r.json();
+  if(!url || !tickers.length) return Promise.resolve(null);
+  return new Promise((resolve,reject)=>{
+    const cb = "__ksaPrices" + (++_jsonpN);
+    let s;
+    const cleanup = ()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(s&&s.parentNode) s.parentNode.removeChild(s); };
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 25000);
+    window[cb] = (data)=>{ clearTimeout(timer); cleanup(); resolve(data); };
+    const u = url + (url.includes("?")?"&":"?") + "tickers=" + encodeURIComponent(tickers.join(",")) + "&callback=" + cb;
+    s = document.createElement("script");
+    s.src = u;
+    s.onerror = ()=>{ clearTimeout(timer); cleanup(); reject(new Error("script load failed")); };
+    document.head.appendChild(s);
+  });
 }
 
 let _tokenClient=null, _tokenClientId="", _accessToken="", _tokenExp=0;
