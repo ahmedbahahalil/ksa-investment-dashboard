@@ -10,9 +10,10 @@
  *   2. Run installDailyTrigger() once (authorize Drive access when prompted).
  *   3. Optionally run refreshPrices() once to test it now.
  *
- * Price source is Yahoo Finance (ticker + ".SR"). It's an unofficial endpoint
- * and may rate-limit or change — check the execution log; if a price comes back
- * 0 the old price is kept. Swap fetchPrice_() if you have a better data source.
+ * Prices are fetched from Yahoo Finance (ticker + ".SR") in parallel via
+ * UrlFetchApp.fetchAll — fast even for a long watchlist. It's an unofficial
+ * endpoint and may rate-limit; if a price comes back 0 the old price is kept.
+ * Swap fetchPrices_()/parsePrice_() if you have a better data source.
  */
 
 var PORTFOLIO_FILE = "ksa-portfolio.json";
@@ -25,11 +26,11 @@ function refreshPrices() {
 
   var data = JSON.parse(file.getBlob().getDataAsString());
   var holdings = data.holdings || [];
+  var prices = fetchPrices_(holdings.map(function (h) { return h.ticker; }));
   var updated = 0;
 
   holdings.forEach(function (h) {
-    if (!h.ticker) return;
-    var price = fetchPrice_(h.ticker);
+    var price = prices[h.ticker];
     if (price > 0) { h.price = price; updated++; Logger.log("✓ " + h.ticker + " → " + price); }
     else { Logger.log("· " + h.ticker + " — no price, kept " + h.price); }
   });
@@ -52,8 +53,7 @@ function refreshPrices() {
 function doGet(e) {
   var tickers = ((e && e.parameter && e.parameter.tickers) || "")
     .split(",").map(function (s) { return s.trim(); }).filter(String);
-  var prices = {};
-  tickers.forEach(function (t) { var p = fetchPrice_(t); if (p > 0) prices[t] = p; });
+  var prices = fetchPrices_(tickers);
   var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
   var json = JSON.stringify(out);
   // JSONP: Apps Script sends no CORS headers, so the dashboard loads this via a <script> tag
@@ -65,10 +65,29 @@ function doGet(e) {
   return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
 }
 
-function fetchPrice_(ticker) {
+// Fetches all tickers in PARALLEL (UrlFetchApp.fetchAll) — ~1–2s for 16 vs ~15s one-by-one.
+function fetchPrices_(tickers) {
+  tickers = (tickers || []).map(function (t) { return (t || "").trim(); }).filter(String);
+  var out = {};
+  if (!tickers.length) return out;
+  var requests = tickers.map(function (t) {
+    return {
+      url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(t) + ".SR",
+      muteHttpExceptions: true,
+      headers: { "User-Agent": "Mozilla/5.0" }
+    };
+  });
+  var responses;
+  try { responses = UrlFetchApp.fetchAll(requests); } catch (e) { return out; }
+  responses.forEach(function (resp, i) {
+    var p = parsePrice_(resp);
+    if (p > 0) out[tickers[i]] = p;
+  });
+  return out;
+}
+
+function parsePrice_(resp) {
   try {
-    var url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + ".SR";
-    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { "User-Agent": "Mozilla/5.0" } });
     if (resp.getResponseCode() !== 200) return 0;
     var j = JSON.parse(resp.getContentText());
     var meta = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
