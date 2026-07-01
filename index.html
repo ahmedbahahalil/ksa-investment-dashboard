@@ -183,6 +183,7 @@ const DEFAULT_STATE = {
   transactions:[],
   dividends:[],
   watchlist:[],
+  history:[],
 };
 
 /* ----------------------------- helpers ------------------------------ */
@@ -192,6 +193,8 @@ const fmt = (n,d=0)=> (isFinite(n)?n:0).toLocaleString("en-US",{minimumFractionD
 const sar = (n,d=0)=> fmt(n,d)+" SAR";
 const pct = (n,d=1)=> fmt(n,d)+"%";
 const num = v => { const x=parseFloat(v); return isFinite(x)?x:0; };
+const round2 = n => Math.round(num(n)*100)/100;
+const todayRiyadh = () => new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Riyadh"}).format(new Date());
 
 function mergeState(s){
   s = s || {};
@@ -203,6 +206,7 @@ function mergeState(s){
     transactions: s.transactions||[],
     dividends: s.dividends||[],
     watchlist: s.watchlist||[],
+    history: s.history||[],
   };
 }
 function loadState(){
@@ -306,6 +310,21 @@ function equityValue(holdings){ return holdings.reduce((a,h)=>a+num(h.price)*num
 const holdingPL   = h  => (num(h.price)-num(h.avgCost))*num(h.shares);
 const portfolioCost = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? num(h.avgCost)*num(h.shares) : 0), 0);
 const portfolioPL   = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? holdingPL(h) : 0), 0);
+
+// Day-over-day: upsert one snapshot per day (Riyadh), updated on each price refresh.
+function withSnapshot(st){
+  const date = todayRiyadh();
+  const equity = equityValue(st.holdings);
+  const snap = {
+    date,
+    value: round2(equity + num(st.cash) + num(st.stake.currentValue)),
+    equity: round2(equity),
+    cash: round2(num(st.cash)),
+    pl: round2(portfolioPL(st.holdings)),
+  };
+  const hist = (st.history||[]).filter(h=>h.date!==date).concat([snap]).sort((a,b)=> a.date<b.date?-1:1);
+  return {...st, history: hist};
+}
 function weightedEquityYield(holdings){
   const tw = holdings.reduce((a,h)=>a+num(h.targetPct),0)||1;
   return holdings.reduce((a,h)=>a+num(h.targetPct)*num(h.yield),0)/tw;
@@ -961,6 +980,72 @@ function Watchlist({st,update}){
   );
 }
 
+function LineChart({points}){
+  if(!points || points.length<2) return <div className="empty">Not enough history yet — the trend builds as prices refresh over the coming days.</div>;
+  const w=600, h=150, pad=10;
+  const vals = points.map(p=>p.value);
+  const min = Math.min(...vals), max = Math.max(...vals), range = (max-min)||1;
+  const x = i => pad + i*(w-2*pad)/(points.length-1);
+  const y = v => pad + (1-(v-min)/range)*(h-2*pad);
+  const d = points.map((p,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(p.value).toFixed(1)).join(" ");
+  const up = points[points.length-1].value >= points[0].value;
+  const col = up ? "var(--accent)" : "var(--danger)";
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none" style={{display:"block"}}>
+      <path d={d+` L ${x(points.length-1).toFixed(1)} ${h-pad} L ${x(0).toFixed(1)} ${h-pad} Z`} fill={col} opacity="0.08"/>
+      <path d={d} fill="none" stroke={col} strokeWidth="2" vectorEffect="non-scaling-stroke"/>
+    </svg>
+  );
+}
+
+function History({st}){
+  const sorted = (st.history||[]).slice().sort((a,b)=> a.date<b.date?-1:1);
+  const last = sorted[sorted.length-1], prev = sorted.length>1 ? sorted[sorted.length-2] : null;
+  const dayChange = last&&prev ? last.value-prev.value : 0;
+  const dayPct = last&&prev&&prev.value ? dayChange/prev.value*100 : 0;
+  const rows = sorted.slice().reverse();
+  return (
+    <div>
+      <div className="grid cards">
+        <Stat label="Total value · today" value={last?fmt(last.value):"—"} unit="SAR" foot={last?`snapshot ${last.date}`:"no snapshot yet"}/>
+        <Stat label="Day-over-day" value={(dayChange>=0?"+":"")+fmt(dayChange,2)} unit="SAR"
+          foot={prev?`${(dayPct>=0?"+":"")+pct(dayPct,2)} vs ${prev.date}`:"needs a 2nd day to compare"} footClass={prev?(dayChange>=0?"pos":"neg"):""}/>
+        <Stat label="Days tracked" value={sorted.length} foot="one row per day · today updates on each ↻ Prices"/>
+      </div>
+      <section>
+        <div className="sec-head"><h2>Portfolio value</h2><span className="hint">total incl. cash &amp; Stake</span></div>
+        <div className="card"><LineChart points={sorted}/></div>
+      </section>
+      <section>
+        <div className="sec-head"><h2>Daily snapshots</h2><span className="hint">newest first</span></div>
+        {rows.length ? (
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>Date</th><th>Total</th><th>Equity</th><th>Cash</th><th>Day Δ</th><th>Δ %</th></tr></thead>
+            <tbody>
+              {rows.map((h,i)=>{
+                const p = rows[i+1];   // earlier day (list is newest-first)
+                const chg = p ? h.value-p.value : 0;
+                const pc = p&&p.value ? chg/p.value*100 : 0;
+                return (
+                  <tr key={h.date}>
+                    <td><b>{h.date}</b></td>
+                    <td className="num">{sar(h.value)}</td>
+                    <td className="num muted">{sar(h.equity)}</td>
+                    <td className="num muted">{sar(h.cash)}</td>
+                    <td className={"num "+(p?(chg>=0?"pos":"neg"):"")}>{p?(chg>=0?"+":"")+fmt(chg,2):"—"}</td>
+                    <td className={"num "+(p?(chg>=0?"pos":"neg"):"")}>{p?(pc>=0?"+":"")+pct(pc,2):"—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table></div>
+        ) : <div className="card empty">Open the app (and refresh prices) on a few different days to build the day-over-day picture.</div>}
+      </section>
+      <p className="small muted" style={{marginTop:10}}>Today's row updates on every price refresh; past days stay fixed. Days you don't open the app leave a gap — the daily Apps Script also records a close snapshot once you're on its latest version.</p>
+    </div>
+  );
+}
+
 function CloudChip({cloud,onConnect,onDisconnect}){
   const {status,email,last,msg} = cloud;
   if(status==="on"){
@@ -983,6 +1068,7 @@ function App(){
 
   useEffect(()=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(st)); }catch(e){} },[st]);
   useEffect(()=>{ if(getPricesUrl()) refreshPricesNow(true); },[]);   // fetch-on-open
+  useEffect(()=>{ setSt(s=>withSnapshot(s)); },[]);                    // record today's snapshot on open
 
   // push local changes up to Drive (debounced) once connected
   useEffect(()=>{
@@ -1033,7 +1119,7 @@ function App(){
       let n=0;
       const holdings = st.holdings.map(h=>{ const p=num(prices[h.ticker]); if(p>0){ n++; return {...h, price:p}; } return h; });
       const watchlist = wl.map(w=>{ const p=num(prices[w.ticker]); if(p>0){ n++; return {...w, price:p}; } return w; });
-      if(n>0) setSt({...st, holdings, watchlist, settings:{...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"}});
+      if(n>0) setSt(withSnapshot({...st, holdings, watchlist, settings:{...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"}}));
       setPriceState(n>0 ? "" : "no prices returned");
     }catch(e){ setPriceState("couldn't reach price source"); }
   }
@@ -1047,7 +1133,7 @@ function App(){
   }
   function reset(){ if(confirm("Reset to default seed data? Your logged trades and edits will be lost.")) setSt(DEFAULT_STATE); }
 
-  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["watchlist","Watchlist"],["income","Income"],["logs","Logs"]];
+  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["watchlist","Watchlist"],["income","Income"],["logs","Logs"],["history","History"]];
 
   return (
     <div className="wrap">
@@ -1085,6 +1171,7 @@ function App(){
       {tab==="watchlist" && <Watchlist st={st} update={setSt}/>}
       {tab==="income" && <Income st={st} update={setSt}/>}
       {tab==="logs" && <Logs st={st} update={setSt}/>}
+      {tab==="history" && <History st={st}/>}
 
       <footer>
         <div className="btn-row">

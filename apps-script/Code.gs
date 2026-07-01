@@ -37,6 +37,21 @@ function refreshPrices() {
 
   data.settings = data.settings || {};
   data.settings.pricesUpdated = Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd") + " (auto)";
+
+  // Day-over-day: upsert one close snapshot per day, matching the dashboard's history.
+  var r2 = function (n) { return Math.round((Number(n)||0)*100)/100; };
+  var equity = 0, pl = 0;
+  holdings.forEach(function (h) {
+    var p = Number(h.price)||0, sh = Number(h.shares)||0, a = Number(h.avgCost)||0;
+    equity += p*sh; if (a>0) pl += (p-a)*sh;
+  });
+  var cash = Number(data.cash)||0, stake = (data.stake && Number(data.stake.currentValue))||0;
+  var today = Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd");
+  var hist = (data.history||[]).filter(function (x) { return x.date !== today; });
+  hist.push({ date: today, value: r2(equity+cash+stake), equity: r2(equity), cash: r2(cash), pl: r2(pl) });
+  hist.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  data.history = hist;
+
   data.updatedAt = Date.now();
   file.setContent(JSON.stringify(data));
   Logger.log("Done — updated " + updated + " of " + holdings.length + " prices.");
