@@ -176,7 +176,7 @@ const PLAN_CANDIDATES = [
 ];
 
 const DEFAULT_STATE = {
-  settings:{ monthlyBudget:1000, stakePct:35, sahmPct:65, reinvest:true, years:5, pricesUpdated:"2026-06-30 (Sahm)" },
+  settings:{ monthlyBudget:1000, stakePct:35, sahmPct:65, reinvest:true, years:5, stakeLagMonths:6, pricesUpdated:"2026-06-30 (Sahm)" },
   cash:23.84,
   stake:{ currentValue:1100, yield:9.4 },
   holdings: DEFAULT_HOLDINGS.map(h=>({...h})),
@@ -184,6 +184,8 @@ const DEFAULT_STATE = {
   dividends:[],
   watchlist:[],
   history:[],
+  deposits:[],
+  adjustments:[],
 };
 
 /* ----------------------------- helpers ------------------------------ */
@@ -207,6 +209,8 @@ function mergeState(s){
     dividends: s.dividends||[],
     watchlist: s.watchlist||[],
     history: s.history||[],
+    deposits: s.deposits||[],
+    adjustments: s.adjustments||[],
   };
 }
 function loadState(){
@@ -311,6 +315,28 @@ const holdingPL   = h  => (num(h.price)-num(h.avgCost))*num(h.shares);
 const portfolioCost = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? num(h.avgCost)*num(h.shares) : 0), 0);
 const portfolioPL   = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? holdingPL(h) : 0), 0);
 
+// Deposits → total invested (out-of-pocket, by 'paid'); gift counts as invested.
+function investedTotals(st){
+  let sahm=0, stake=0;
+  (st.deposits||[]).forEach(d=>{ const p=num(d.paid); if(d.platform==="Stake") stake+=p; else sahm+=p; });
+  return {sahm, stake, total: sahm+stake};
+}
+// Stake split: contributions whose earning-start date is still in the future are "pending".
+function stakeSplit(st){
+  const today = todayRiyadh();
+  let pending=0;
+  (st.deposits||[]).forEach(d=>{ if(d.platform==="Stake" && d.earnStart && d.earnStart>today) pending += num(d.credited); });
+  const value = num(st.stake.currentValue);
+  pending = Math.max(0, Math.min(pending, value));
+  return {value, pending, earning: value-pending};
+}
+function monthsUntil(dateStr){
+  if(!dateStr) return 0;
+  const t = new Date(dateStr+"T00:00:00"); if(isNaN(t)) return 0;
+  const ms = t - new Date();
+  return ms<=0 ? 0 : Math.ceil(ms/(1000*60*60*24*30.4375));
+}
+
 // Day-over-day: upsert one snapshot per day (Riyadh), updated on each price refresh.
 function withSnapshot(st){
   const date = todayRiyadh();
@@ -409,23 +435,34 @@ function projectIncome(st){
   const reY = num(stake.yield)/100;
   const eqM = num(cfg.monthlyBudget)*num(cfg.sahmPct)/100;
   const reM = num(cfg.monthlyBudget)*num(cfg.stakePct)/100;
+  const lag = Math.max(0, Math.round(num(cfg.stakeLagMonths)||0));
+  const split = stakeSplit(st);
   let eqBal = equityValue(holdings);
-  let reBal = num(stake.currentValue);
-  let invested = eqBal+reBal;
+  let reEarning = split.earning;                 // Stake principal already yielding
+  // pending Stake tranches (logged contributions not yet earning) + future contributions get the lag
+  let tranches = (st.deposits||[])
+    .filter(d=> d.platform==="Stake" && d.earnStart && d.earnStart>todayRiyadh())
+    .map(d=> ({amt:num(d.credited), m:monthsUntil(d.earnStart)}));
+  let invested = investedTotals(st).total;
   const rows=[];
   const years = Math.max(1,Math.min(15,num(cfg.years)||5));
   for(let y=1;y<=years;y++){
     let yearIncome=0;
-    for(let m=0;m<12;m++){
-      eqBal+=eqM; reBal+=reM; invested+=eqM+reM;
-      const inc = eqBal*eqY/12 + reBal*reY/12;
-      yearIncome+=inc;
-      if(cfg.reinvest){ eqBal+=eqBal*eqY/12; reBal+=reBal*reY/12; }
+    for(let mo=0;mo<12;mo++){
+      eqBal += eqM; invested += eqM + reM;
+      if(reM>0) tranches.push({amt:reM, m:lag});         // this month's Stake money starts earning after the lag
+      tranches.forEach(t=> t.m -= 1);
+      tranches.filter(t=>t.m<=0).forEach(t=> reEarning += t.amt);
+      tranches = tranches.filter(t=>t.m>0);
+      const inc = eqBal*eqY/12 + reEarning*reY/12;        // only earning Stake yields; equity yields immediately
+      yearIncome += inc;
+      if(cfg.reinvest){ eqBal += eqBal*eqY/12; reEarning += reEarning*reY/12; }
     }
-    const runRate = eqBal*eqY/12 + reBal*reY/12;
-    rows.push({year:y, invested, value:eqBal+reBal, annualIncome:yearIncome, monthlyIncome:runRate});
+    const pendingAmt = tranches.reduce((a,t)=>a+t.amt,0);
+    const runRate = eqBal*eqY/12 + reEarning*reY/12;
+    rows.push({year:y, invested, value:eqBal+reEarning+pendingAmt, annualIncome:yearIncome, monthlyIncome:runRate});
   }
-  return {rows, eqYield:eqY*100, reYield:reY*100};
+  return {rows, eqYield:eqY*100, reYield:reY*100, split};
 }
 
 function download(filename, text, type="text/plain"){
@@ -485,6 +522,14 @@ function Dashboard({st}){
   const yr1 = proj.rows[0]||{}; const last = proj.rows[proj.rows.length-1]||{};
   const sectors = sectorAgg(st.holdings);
   const barMax = Math.max(30, ...sectors.flatMap(s=>[s.target, s.curPct]));
+  const inv = investedTotals(st);
+  const split = stakeSplit(st);
+  const sahmVal = eq + cash, stakeVal = num(st.stake.currentValue);
+  const retRows = [
+    {k:"Sahm", invested:inv.sahm, value:sahmVal},
+    {k:"Stake", invested:inv.stake, value:stakeVal},
+    {k:"Total", invested:inv.total, value:sahmVal+stakeVal},
+  ].map(r=>({...r, ret:r.value-r.invested, pct: r.invested>0?(r.value-r.invested)/r.invested*100:0}));
 
   // top-level split donut: Sahm equity vs Stake real estate (by current value)
   const splitSegs = [
@@ -562,6 +607,27 @@ function Dashboard({st}){
             );
           })}
         </div>
+      </section>
+
+      <section>
+        <div className="sec-head"><h2>Invested vs. value</h2><span className="hint">money you put in vs. what it's worth</span></div>
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>Sleeve</th><th>Invested</th><th>Value</th><th>Return</th><th>%</th></tr></thead>
+          <tbody>
+            {retRows.map(r=>(
+              <tr key={r.k}>
+                <td><b>{r.k}</b></td>
+                <td className="num">{r.invested>0?sar(r.invested):"—"}</td>
+                <td className="num">{sar(r.value)}</td>
+                <td className={"num "+(r.invested>0?(r.ret>=0?"pos":"neg"):"")}>{r.invested>0?((r.ret>=0?"+":"")+fmt(r.ret,2)):"—"}</td>
+                <td className={"num "+(r.invested>0?(r.ret>=0?"pos":"neg"):"")}>{r.invested>0?((r.pct>=0?"+":"")+pct(r.pct,2)):"—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+        <p className="small muted" style={{marginTop:10}}>
+          Invested = money you've put in (from logged deposits) — log them under <b>Activity</b>. Stake: <b>{sar(split.earning)}</b> earning · <b>{sar(split.pending)}</b> pending (not yielding yet). Return = current value − invested.
+        </p>
       </section>
     </div>
   );
@@ -775,6 +841,8 @@ function Income({st,update}){
             <input value={st.settings.stakePct} onChange={e=>{const v=num(e.target.value);update({...st,settings:{...st.settings,stakePct:v,sahmPct:100-v}})}}/></div>
           <div className="field"><label>Projection years</label>
             <input value={st.settings.years} onChange={e=>update({...st,settings:{...st.settings,years:num(e.target.value)}})}/></div>
+          <div className="field"><label>Stake earning lag (mo)</label>
+            <input value={st.settings.stakeLagMonths} onChange={e=>update({...st,settings:{...st.settings,stakeLagMonths:num(e.target.value)}})}/></div>
         </div>
         <label className="toggle" style={{marginTop:12}}>
           <input type="checkbox" checked={!!st.settings.reinvest} onChange={e=>update({...st,settings:{...st.settings,reinvest:e.target.checked}})}/>
@@ -785,6 +853,8 @@ function Income({st,update}){
       <div className="grid cards" style={{marginBottom:6}}>
         <Stat label="Equity blended yield" value={pct(proj.eqYield)} foot="weighted by target %"/>
         <Stat label="Real-estate yield" value={pct(proj.reYield)} foot="Stake fund"/>
+        <Stat label="Stake earning / pending" value={fmt(proj.split.earning)+" / "+fmt(proj.split.pending)} unit="SAR"
+          foot="pending = contributed, not yielding yet"/>
       </div>
 
       <div className="tbl-wrap">
@@ -805,6 +875,7 @@ function Income({st,update}){
       </div>
       <p className="small muted" style={{marginTop:10}}>
         Income = dividends + rental yield only; <b>excludes</b> share-price gains/losses. "Monthly income" is the year-end run rate.
+        Stake money only starts yielding after its earning date (logged contributions) or the {fmt(num(st.settings.stakeLagMonths))}-month lag (future contributions).
         Figures follow your inputs above — they are a model, not a guarantee.
       </p>
     </div>
@@ -812,53 +883,90 @@ function Income({st,update}){
 }
 
 function Logs({st,update}){
-  const blankTx = {date:"",ticker:"",action:"BUY",qty:"",price:"",commission:"",note:""};
-  const blankDv = {date:"",ticker:"",perShare:"",shares:"",note:""};
-  const [tx,setTx] = useState(blankTx);
-  const [dv,setDv] = useState(blankDv);
+  const t0 = todayRiyadh();
+  const blankTx = {date:t0,ticker:"",action:"BUY",qty:"",price:"",commission:"",note:""};
+  const blankDv = {date:t0,ticker:"",perShare:"",shares:"",note:""};
+  const blankDep = {date:t0,platform:"Sahm",paid:"",credited:"",note:"",earnStart:"",opening:false};
+  const blankAdj = {date:t0,field:"cash",value:"",note:""};
+  const [tx,setTx]=useState(blankTx);
+  const [dv,setDv]=useState(blankDv);
+  const [dep,setDep]=useState(blankDep);
+  const [adj,setAdj]=useState(blankAdj);
 
   function addTx(){
-    const ticker = (tx.ticker||"").trim();
-    if(!ticker) return;
-    const qty = num(tx.qty), price = num(tx.price), commission = num(tx.commission);
-    const round2 = n => Math.round(n*100)/100;
-    const rec = {...tx, ticker, qty, price, commission, total: qty*price + commission};
-    // apply the trade to Holdings: shares +/- and weighted average cost on buys
-    let holdings = st.holdings.slice();
-    const i = holdings.findIndex(h => (h.ticker||"").trim() === ticker);
-    if(i >= 0){
-      const h = holdings[i], s0 = num(h.shares), a0 = num(h.avgCost);
-      if(tx.action === "SELL"){
-        holdings[i] = {...h, shares: Math.max(0, s0 - qty)};       // realised P/L not tracked; avg cost unchanged
-      } else {
-        const s1 = s0 + qty;
-        holdings[i] = {...h, shares: s1, avgCost: s1>0 ? round2((s0*a0 + qty*price + commission)/s1) : 0};
-      }
-    } else if(tx.action === "BUY"){
-      holdings.push({ticker, name:"", sector:"Other", targetPct:0, price, shares:qty, avgCost: qty>0 ? round2((qty*price+commission)/qty) : price, yield:0});
+    const ticker=(tx.ticker||"").trim(); if(!ticker) return;
+    const qty=num(tx.qty), price=num(tx.price), commission=num(tx.commission);
+    const rec={...tx, ticker, qty, price, commission, total: qty*price+commission};
+    let holdings=st.holdings.slice();
+    const i=holdings.findIndex(h=>(h.ticker||"").trim()===ticker);
+    if(i>=0){
+      const h=holdings[i], s0=num(h.shares), a0=num(h.avgCost);
+      if(tx.action==="SELL") holdings[i]={...h, shares:Math.max(0,s0-qty)};
+      else { const s1=s0+qty; holdings[i]={...h, shares:s1, avgCost: s1>0?round2((s0*a0+qty*price+commission)/s1):0}; }
+    } else if(tx.action==="BUY"){
+      holdings.push({ticker, name:"", sector:"Other", targetPct:0, price, shares:qty, avgCost: qty>0?round2((qty*price+commission)/qty):price, yield:0});
     }
-    // cash at hand: a buy spends cash, a sell adds proceeds (both net of commission)
-    const cashDelta = tx.action === "SELL" ? (qty*price - commission) : -(qty*price + commission);
-    update({...st, cash: round2(num(st.cash) + cashDelta), holdings, transactions:[rec, ...st.transactions]});
-    setTx(blankTx);
+    const cashDelta = tx.action==="SELL" ? (qty*price-commission) : -(qty*price+commission);
+    update({...st, cash: round2(num(st.cash)+cashDelta), holdings, transactions:[rec, ...(st.transactions||[])]});
+    setTx({...blankTx});
   }
   function addDv(){
-    if(!dv.ticker) return;
-    const rec = {...dv, perShare:num(dv.perShare), shares:num(dv.shares), total:num(dv.perShare)*num(dv.shares)};
-    update({...st, dividends:[rec, ...st.dividends]});
-    setDv(blankDv);
+    const ticker=(dv.ticker||"").trim(); if(!ticker) return;
+    const rec={...dv, ticker, perShare:num(dv.perShare), shares:num(dv.shares), total:num(dv.perShare)*num(dv.shares)};
+    update({...st, dividends:[rec, ...(st.dividends||[])]});
+    setDv({...blankDv});
   }
-  const delTx = i => update({...st, transactions: st.transactions.filter((_,j)=>j!==i)});
-  const delDv = i => update({...st, dividends: st.dividends.filter((_,j)=>j!==i)});
-  const ytdDiv = st.dividends.reduce((a,d)=>a+num(d.total),0);
+  function addDeposit(){
+    const paid=num(dep.paid); const credited = dep.credited!==""?num(dep.credited):paid;
+    if(!(paid>0) && !(credited>0)) return;
+    const rec={kind:"deposit", date:dep.date||t0, platform:dep.platform, paid, credited, note:dep.note, earnStart: dep.platform==="Stake"?dep.earnStart:"", opening:!!dep.opening};
+    let patch={deposits:[rec, ...(st.deposits||[])]};
+    if(!dep.opening){
+      if(dep.platform==="Sahm") patch.cash=round2(num(st.cash)+credited);
+      else patch.stake={...st.stake, currentValue:round2(num(st.stake.currentValue)+credited)};
+    }
+    update({...st, ...patch});
+    setDep({...blankDep});
+  }
+  function addAdjustment(){
+    const to=num(adj.value); let from=0, label="", patch={};
+    if(adj.field==="cash"){ from=num(st.cash); label="Cash"; patch.cash=round2(to); }
+    else if(adj.field==="stake"){ from=num(st.stake.currentValue); label="Stake value"; patch.stake={...st.stake, currentValue:round2(to)}; }
+    else { const tk=adj.field.replace("sh:",""); const h=st.holdings.find(x=>x.ticker===tk); if(!h) return;
+      from=num(h.shares); label=tk+" shares"; patch.holdings=st.holdings.map(x=> x.ticker===tk?{...x, shares:to}:x); }
+    const rec={kind:"adjustment", date:adj.date||t0, label, from:round2(from), to:round2(to), note:adj.note};
+    update({...st, ...patch, adjustments:[rec, ...(st.adjustments||[])]});
+    setAdj({...blankAdj});
+  }
+  function del(src,i){ update({...st, [src]: (st[src]||[]).filter((_,j)=>j!==i)}); }
+
+  const inv = investedTotals(st);
+  const activity=[];
+  (st.transactions||[]).forEach((t,i)=> activity.push({date:t.date, type:"Trade", detail:`${t.action} ${fmt(t.qty)} ${t.ticker} @ ${fmt(t.price,2)}`, effect:(t.action==="SELL"?"+":"−")+fmt(t.total,2), cls:t.action==="SELL"?"pos":"neg", src:"transactions", i}));
+  (st.dividends||[]).forEach((d,i)=> activity.push({date:d.date, type:"Dividend", detail:`${d.ticker} · ${fmt(d.perShare,2)}/sh × ${fmt(d.shares)}`, effect:"+"+fmt(d.total,2), cls:"pos", src:"dividends", i}));
+  (st.deposits||[]).forEach((d,i)=> activity.push({date:d.date, type:"Deposit", detail:`${d.platform}${d.opening?" (opening)":""}${num(d.paid)!==num(d.credited)?` · paid ${fmt(d.paid,2)}, credited ${fmt(d.credited,2)}`:""}${d.earnStart?` · earns ${d.earnStart}`:""}${d.note?` · ${d.note}`:""}`, effect:"+"+fmt(d.paid,2), cls:"", src:"deposits", i}));
+  (st.adjustments||[]).forEach((a,i)=> activity.push({date:a.date, type:"Adjust", detail:`${a.label}: ${fmt(a.from,2)} → ${fmt(a.to,2)}${a.note?` · ${a.note}`:""}`, effect:"", cls:"", src:"adjustments", i}));
+  activity.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+
+  const F = ({label,hint,children}) => (
+    <div className="card">
+      <div className="sec-head"><h3 style={{fontSize:14}}>{label}</h3>{hint&&<span className="hint">{hint}</span>}</div>
+      {children}
+    </div>
+  );
 
   return (
     <div>
-      <section style={{marginTop:0}}>
-        <div className="sec-head"><h2>Trade log</h2><span className="hint">a logged trade updates that stock's shares &amp; avg cost in Holdings</span></div>
-        <div className="card" style={{marginBottom:12}}>
+      <div className="grid cards" style={{marginBottom:14}}>
+        <Stat label="Invested — Sahm" value={fmt(inv.sahm)} unit="SAR" foot="sum of your Sahm deposits"/>
+        <Stat label="Invested — Stake" value={fmt(inv.stake)} unit="SAR" foot="sum of your Stake contributions"/>
+        <Stat label="Invested — total" value={fmt(inv.total)} unit="SAR" foot="money you've put in"/>
+      </div>
+
+      <div className="two-col">
+        <F label="Log a trade" hint="updates shares, avg cost & cash">
           <div className="controls">
-            <div className="field"><label>Date</label><input placeholder="2026-06-30" value={tx.date} onChange={e=>setTx({...tx,date:e.target.value})}/></div>
+            <div className="field"><label>Date</label><input value={tx.date} onChange={e=>setTx({...tx,date:e.target.value})}/></div>
             <div className="field"><label>Ticker</label><input value={tx.ticker} onChange={e=>setTx({...tx,ticker:e.target.value})}/></div>
             <div className="field"><label>Action</label><select value={tx.action} onChange={e=>setTx({...tx,action:e.target.value})}><option>BUY</option><option>SELL</option></select></div>
             <div className="field"><label>Qty</label><input value={tx.qty} onChange={e=>setTx({...tx,qty:e.target.value})}/></div>
@@ -866,40 +974,66 @@ function Logs({st,update}){
             <div className="field"><label>Commission</label><input value={tx.commission} onChange={e=>setTx({...tx,commission:e.target.value})}/></div>
           </div>
           <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addTx}>Add trade</button></div>
-        </div>
-        {st.transactions.length? (
-          <div className="tbl-wrap"><table>
-            <thead><tr><th>Date</th><th>Ticker</th><th>Action</th><th>Qty</th><th>Price</th><th>Total</th><th></th></tr></thead>
-            <tbody>{st.transactions.map((t,i)=>(
-              <tr key={i}><td>{t.date||"—"}</td><td><b>{t.ticker}</b></td><td>{t.action}</td>
-                <td className="num">{fmt(t.qty)}</td><td className="num">{sar(t.price,2)}</td><td className="num">{sar(t.total,2)}</td>
-                <td><button className="icon-btn" onClick={()=>delTx(i)}>✕</button></td></tr>
-            ))}</tbody>
-          </table></div>
-        ):<div className="card empty">No trades logged yet.</div>}
-      </section>
+        </F>
 
-      <section>
-        <div className="sec-head"><h2>Dividend log</h2><span className="hint">YTD collected: {sar(ytdDiv,2)}</span></div>
-        <div className="card" style={{marginBottom:12}}>
+        <F label="Log a dividend">
           <div className="controls">
-            <div className="field"><label>Date</label><input placeholder="2026-06-30" value={dv.date} onChange={e=>setDv({...dv,date:e.target.value})}/></div>
+            <div className="field"><label>Date</label><input value={dv.date} onChange={e=>setDv({...dv,date:e.target.value})}/></div>
             <div className="field"><label>Ticker</label><input value={dv.ticker} onChange={e=>setDv({...dv,ticker:e.target.value})}/></div>
             <div className="field"><label>Per share</label><input value={dv.perShare} onChange={e=>setDv({...dv,perShare:e.target.value})}/></div>
             <div className="field"><label>Shares held</label><input value={dv.shares} onChange={e=>setDv({...dv,shares:e.target.value})}/></div>
           </div>
           <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addDv}>Add dividend</button></div>
-        </div>
-        {st.dividends.length? (
+        </F>
+
+        <F label="Record a deposit" hint="money into Sahm / Stake">
+          <div className="controls">
+            <div className="field"><label>Date</label><input value={dep.date} onChange={e=>setDep({...dep,date:e.target.value})}/></div>
+            <div className="field"><label>Platform</label><select value={dep.platform} onChange={e=>setDep({...dep,platform:e.target.value})}><option>Sahm</option><option>Stake</option></select></div>
+            <div className="field"><label>Paid (out of pocket)</label><input value={dep.paid} onChange={e=>setDep({...dep,paid:e.target.value})}/></div>
+            <div className="field"><label>Credited</label><input placeholder="= paid" value={dep.credited} onChange={e=>setDep({...dep,credited:e.target.value})}/></div>
+            {dep.platform==="Stake" && <div className="field"><label>Earning starts</label><input placeholder="2026-10-01" value={dep.earnStart} onChange={e=>setDep({...dep,earnStart:e.target.value})}/></div>}
+            <div className="field"><label>Note</label><input value={dep.note} onChange={e=>setDep({...dep,note:e.target.value})}/></div>
+          </div>
+          <div className="btn-row" style={{marginTop:12}}>
+            <button className="btn primary" onClick={addDeposit}>Add deposit</button>
+            <label className="toggle"><input type="checkbox" checked={dep.opening} onChange={e=>setDep({...dep,opening:e.target.checked})}/> opening (already in balance)</label>
+          </div>
+        </F>
+
+        <F label="Record an adjustment" hint="applies & audits">
+          <div className="controls">
+            <div className="field"><label>Date</label><input value={adj.date} onChange={e=>setAdj({...adj,date:e.target.value})}/></div>
+            <div className="field"><label>Field</label>
+              <select value={adj.field} onChange={e=>setAdj({...adj,field:e.target.value})}>
+                <option value="cash">Cash</option>
+                <option value="stake">Stake value</option>
+                {st.holdings.map(h=> <option key={h.ticker} value={"sh:"+h.ticker}>{h.ticker} shares</option>)}
+              </select>
+            </div>
+            <div className="field"><label>New value</label><input value={adj.value} onChange={e=>setAdj({...adj,value:e.target.value})}/></div>
+            <div className="field"><label>Note</label><input value={adj.note} onChange={e=>setAdj({...adj,note:e.target.value})}/></div>
+          </div>
+          <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addAdjustment}>Record adjustment</button></div>
+        </F>
+      </div>
+
+      <section>
+        <div className="sec-head"><h2>Activity</h2><span className="hint">newest first · delete removes the record (won't reverse a balance)</span></div>
+        {activity.length? (
           <div className="tbl-wrap"><table>
-            <thead><tr><th>Date</th><th>Ticker</th><th>Per share</th><th>Shares</th><th>Total</th><th></th></tr></thead>
-            <tbody>{st.dividends.map((d,i)=>(
-              <tr key={i}><td>{d.date||"—"}</td><td><b>{d.ticker}</b></td>
-                <td className="num">{sar(d.perShare,2)}</td><td className="num">{fmt(d.shares)}</td><td className="num pos">{sar(d.total,2)}</td>
-                <td><button className="icon-btn" onClick={()=>delDv(i)}>✕</button></td></tr>
+            <thead><tr><th>Date</th><th>Type</th><th>Detail</th><th>Effect</th><th></th></tr></thead>
+            <tbody>{activity.map((a,k)=>(
+              <tr key={k}>
+                <td>{a.date||"—"}</td>
+                <td><span className="chip">{a.type}</span></td>
+                <td className="small">{a.detail}</td>
+                <td className={"num "+(a.cls||"")}>{a.effect||"—"}</td>
+                <td><button className="icon-btn" onClick={()=>del(a.src,a.i)}>✕</button></td>
+              </tr>
             ))}</tbody>
           </table></div>
-        ):<div className="card empty">No dividends logged yet.</div>}
+        ):<div className="card empty">Nothing logged yet — use the forms above.</div>}
       </section>
     </div>
   );
@@ -1186,7 +1320,7 @@ function App(){
   }
   function reset(){ if(confirm("Reset to default seed data? Your logged trades and edits will be lost.")) setSt(DEFAULT_STATE); }
 
-  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["watchlist","Watchlist"],["income","Income"],["logs","Logs"],["history","History"]];
+  const tabs = [["dashboard","Dashboard"],["plan","Monthly plan"],["holdings","Holdings"],["watchlist","Watchlist"],["income","Income"],["logs","Activity"],["history","History"]];
 
   return (
     <div className="wrap">
