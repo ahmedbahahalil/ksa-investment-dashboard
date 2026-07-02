@@ -315,12 +315,15 @@ const portfolioPL   = hs => hs.reduce((a,h)=> a + (num(h.avgCost)>0 ? holdingPL(
 function withSnapshot(st){
   const date = todayRiyadh();
   const equity = equityValue(st.holdings);
+  const prices = {};
+  st.holdings.forEach(h=>{ if(h.ticker) prices[h.ticker] = round2(num(h.price)); });
   const snap = {
     date,
     value: round2(equity + num(st.cash) + num(st.stake.currentValue)),
     equity: round2(equity),
     cash: round2(num(st.cash)),
     pl: round2(portfolioPL(st.holdings)),
+    prices,
   };
   const hist = (st.history||[]).filter(h=>h.date!==date).concat([snap]).sort((a,b)=> a.date<b.date?-1:1);
   return {...st, history: hist};
@@ -999,23 +1002,72 @@ function LineChart({points}){
 }
 
 function History({st}){
+  const [mode,setMode] = useState("dod");
+  const N = mode==="wow" ? 7 : mode==="mom" ? 30 : 1;
+  const label = mode==="wow" ? "Week-over-week" : mode==="mom" ? "Month-over-month" : "Day-over-day";
   const sorted = (st.history||[]).slice().sort((a,b)=> a.date<b.date?-1:1);
-  const last = sorted[sorted.length-1], prev = sorted.length>1 ? sorted[sorted.length-2] : null;
-  const dayChange = last&&prev ? last.value-prev.value : 0;
-  const dayPct = last&&prev&&prev.value ? dayChange/prev.value*100 : 0;
+  const latest = sorted[sorted.length-1];
+
+  // baseline = closest snapshot on/before (latest − N days); else earliest available
+  let base = null;
+  if(latest && sorted.length>1){
+    const targetStr = new Date(new Date(latest.date+"T00:00:00Z").getTime() - N*86400000).toISOString().slice(0,10);
+    const earlier = sorted.filter(s=>s.date < latest.date);
+    const atOrBefore = earlier.filter(s=>s.date <= targetStr);
+    base = atOrBefore.length ? atOrBefore[atOrBefore.length-1] : earlier[0];
+  }
+  const change = latest&&base ? latest.value-base.value : 0;
+  const pctc = latest&&base&&base.value ? change/base.value*100 : 0;
+
+  // per-position movers: current price vs baseline snapshot price
+  const movers = (base&&base.prices) ? st.holdings
+    .filter(h=> h.ticker && num(base.prices[h.ticker])>0 && num(h.price)>0)
+    .map(h=>{ const then=num(base.prices[h.ticker]), now=num(h.price);
+      return {ticker:h.ticker, name:h.name, then, now, pct:(now-then)/then*100, sar:(now-then)*num(h.shares)}; })
+    .sort((a,b)=> b.sar-a.sar) : [];
+
   const rows = sorted.slice().reverse();
   return (
     <div>
-      <div className="grid cards">
-        <Stat label="Total value · today" value={last?fmt(last.value):"—"} unit="SAR" foot={last?`snapshot ${last.date}`:"no snapshot yet"}/>
-        <Stat label="Day-over-day" value={(dayChange>=0?"+":"")+fmt(dayChange,2)} unit="SAR"
-          foot={prev?`${(dayPct>=0?"+":"")+pct(dayPct,2)} vs ${prev.date}`:"needs a 2nd day to compare"} footClass={prev?(dayChange>=0?"pos":"neg"):""}/>
-        <Stat label="Days tracked" value={sorted.length} foot="one row per day · today updates on each ↻ Prices"/>
+      <div className="btn-row" style={{marginBottom:14}}>
+        <div className="seg">
+          <button className={mode==="dod"?"on":""} onClick={()=>setMode("dod")}>Day</button>
+          <button className={mode==="wow"?"on":""} onClick={()=>setMode("wow")}>Week</button>
+          <button className={mode==="mom"?"on":""} onClick={()=>setMode("mom")}>Month</button>
+        </div>
       </div>
+
+      <div className="grid cards">
+        <Stat label="Total value · today" value={latest?fmt(latest.value):"—"} unit="SAR" foot={latest?`snapshot ${latest.date}`:"no snapshot yet"}/>
+        <Stat label={label} value={(change>=0?"+":"")+fmt(change,2)} unit="SAR"
+          foot={base?`${(pctc>=0?"+":"")+pct(pctc,2)} vs ${base.date}`:"not enough history yet"} footClass={base?(change>=0?"pos":"neg"):""}/>
+        <Stat label="Days tracked" value={sorted.length} foot="one snapshot per day · today updates on each ↻ Prices"/>
+      </div>
+
       <section>
-        <div className="sec-head"><h2>Portfolio value</h2><span className="hint">total incl. cash &amp; Stake</span></div>
+        <div className="sec-head"><h2>Portfolio value</h2><span className="hint">total incl. cash &amp; Stake · full history</span></div>
         <div className="card"><LineChart points={sorted}/></div>
       </section>
+
+      <section>
+        <div className="sec-head"><h2>Movers — {label.toLowerCase()}</h2><span className="hint">{base?`price move vs ${base.date}`:"per-position, once there's history"}</span></div>
+        {movers.length ? (
+          <div className="tbl-wrap"><table>
+            <thead><tr><th>Stock</th><th>Then → Now</th><th>Move %</th><th>Value impact</th></tr></thead>
+            <tbody>
+              {movers.map(m=>(
+                <tr key={m.ticker}>
+                  <td><b>{m.ticker}</b> <span className="muted small">{m.name}</span></td>
+                  <td className="num muted">{fmt(m.then,2)} → {fmt(m.now,2)}</td>
+                  <td className={"num "+(m.pct>=0?"pos":"neg")}><b>{(m.pct>=0?"+":"")+pct(m.pct,2)}</b></td>
+                  <td className={"num "+(m.sar>=0?"pos":"neg")}>{(m.sar>=0?"+":"")+fmt(m.sar,2)} SAR</td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        ) : <div className="card empty">Per-position movers appear once there's an earlier snapshot with prices to compare against.</div>}
+      </section>
+
       <section>
         <div className="sec-head"><h2>Daily snapshots</h2><span className="hint">newest first</span></div>
         {rows.length ? (
@@ -1039,9 +1091,10 @@ function History({st}){
               })}
             </tbody>
           </table></div>
-        ) : <div className="card empty">Open the app (and refresh prices) on a few different days to build the day-over-day picture.</div>}
+        ) : <div className="card empty">Open the app (and refresh prices) on a few different days to build the picture.</div>}
       </section>
-      <p className="small muted" style={{marginTop:10}}>Today's row updates on every price refresh; past days stay fixed. Days you don't open the app leave a gap — the daily Apps Script also records a close snapshot once you're on its latest version.</p>
+
+      <p className="small muted" style={{marginTop:10}}>Week/Month compare against the closest snapshot to 7 / 30 days back (it names the exact date). Movers reflect price moves only. Today's snapshot updates on every price refresh; past days stay fixed.</p>
     </div>
   );
 }
