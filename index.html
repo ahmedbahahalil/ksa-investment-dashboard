@@ -882,6 +882,13 @@ function Income({st,update}){
   );
 }
 
+const F = ({label,hint,children}) => (
+  <div className="card">
+    <div className="sec-head"><h3 style={{fontSize:14}}>{label}</h3>{hint&&<span className="hint">{hint}</span>}</div>
+    {children}
+  </div>
+);
+
 function Logs({st,update}){
   const t0 = todayRiyadh();
   const blankTx = {date:t0,ticker:"",action:"BUY",qty:"",price:"",commission:"",note:""};
@@ -947,13 +954,6 @@ function Logs({st,update}){
   (st.deposits||[]).forEach((d,i)=> activity.push({date:d.date, type:"Deposit", detail:`${d.platform}${d.opening?" (opening)":""}${num(d.paid)!==num(d.credited)?` · paid ${fmt(d.paid,2)}, credited ${fmt(d.credited,2)}`:""}${d.earnStart?` · earns ${d.earnStart}`:""}${d.note?` · ${d.note}`:""}`, effect:"+"+fmt(d.paid,2), cls:"", src:"deposits", i}));
   (st.adjustments||[]).forEach((a,i)=> activity.push({date:a.date, type:"Adjust", detail:`${a.label}: ${fmt(a.from,2)} → ${fmt(a.to,2)}${a.note?` · ${a.note}`:""}`, effect:"", cls:"", src:"adjustments", i}));
   activity.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
-
-  const F = ({label,hint,children}) => (
-    <div className="card">
-      <div className="sec-head"><h3 style={{fontSize:14}}>{label}</h3>{hint&&<span className="hint">{hint}</span>}</div>
-      {children}
-    </div>
-  );
 
   return (
     <div>
