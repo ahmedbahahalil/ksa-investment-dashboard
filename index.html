@@ -1117,28 +1117,51 @@ function Watchlist({st,update}){
   );
 }
 
-function LineChart({points}){
-  if(!points || points.length<2) return <div className="empty">Not enough history yet — the trend builds as prices refresh over the coming days.</div>;
+function LineChart({points, field="value", empty}){
+  if(!points || points.length<2) return <div className="empty">{empty||"Not enough history yet — the trend builds as prices refresh over the coming days."}</div>;
   const w=600, h=150, pad=10;
-  const vals = points.map(p=>p.value);
+  const vals = points.map(p=>num(p[field]));
   const min = Math.min(...vals), max = Math.max(...vals), range = (max-min)||1;
   const x = i => pad + i*(w-2*pad)/(points.length-1);
   const y = v => pad + (1-(v-min)/range)*(h-2*pad);
-  const d = points.map((p,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(p.value).toFixed(1)).join(" ");
-  const up = points[points.length-1].value >= points[0].value;
+  const d = vals.map((v,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)).join(" ");
+  const up = vals[vals.length-1] >= vals[0];
   const col = up ? "var(--accent)" : "var(--danger)";
+  const zeroY = (min<0 && max>0) ? y(0) : null;   // baseline when the series crosses zero (P&L)
   return (
     <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none" style={{display:"block"}}>
-      <path d={d+` L ${x(points.length-1).toFixed(1)} ${h-pad} L ${x(0).toFixed(1)} ${h-pad} Z`} fill={col} opacity="0.08"/>
+      {zeroY!==null && <line x1={pad} x2={w-pad} y1={zeroY} y2={zeroY} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>}
+      <path d={d+` L ${x(vals.length-1).toFixed(1)} ${h-pad} L ${x(0).toFixed(1)} ${h-pad} Z`} fill={col} opacity="0.08"/>
       <path d={d} fill="none" stroke={col} strokeWidth="2" vectorEffect="non-scaling-stroke"/>
     </svg>
   );
 }
 
+// Collapse daily snapshots into one closing point per day / week / month.
+function bucketSnapshots(sorted, mode){
+  if(mode==="dod") return sorted;
+  const key = d => {
+    if(mode==="mom") return d.slice(0,7);                       // YYYY-MM
+    const dt = new Date(d+"T00:00:00Z");                        // week → its Monday
+    dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay()+6)%7));
+    return dt.toISOString().slice(0,10);
+  };
+  const byBucket = new Map();
+  sorted.forEach(s=> byBucket.set(key(s.date), s));             // sorted asc → last write wins = period close
+  return [...byBucket.values()];
+}
+
 function History({st}){
   const [mode,setMode] = useState("dod");
+  const [series,setSeries] = useState("equity");
   const N = mode==="wow" ? 7 : mode==="mom" ? 30 : 1;
   const label = mode==="wow" ? "Week-over-week" : mode==="mom" ? "Month-over-month" : "Day-over-day";
+  const period = mode==="wow" ? "weekly" : mode==="mom" ? "monthly" : "daily";
+  const SERIES = {
+    equity:{name:"Stocks", hint:"stocks only — excludes cash & Stake"},
+    pl:    {name:"P&L",    hint:"unrealized gain/loss on stocks — unaffected by deposits & buys"},
+    value: {name:"Total",  hint:"everything — stocks + cash + Stake"},
+  };
   const sorted = (st.history||[]).slice().sort((a,b)=> a.date<b.date?-1:1);
   const latest = sorted[sorted.length-1];
 
@@ -1150,8 +1173,12 @@ function History({st}){
     const atOrBefore = earlier.filter(s=>s.date <= targetStr);
     base = atOrBefore.length ? atOrBefore[atOrBefore.length-1] : earlier[0];
   }
-  const change = latest&&base ? latest.value-base.value : 0;
-  const pctc = latest&&base&&base.value ? change/base.value*100 : 0;
+  const chartPoints = bucketSnapshots(sorted, mode);
+  const change = latest&&base ? num(latest[series])-num(base[series]) : 0;
+  const baseVal = base ? num(base[series]) : 0;
+  // % is meaningless off a zero/negative base, and doubly so for P&L (a % of a gain is noise)
+  const showPct = !!base && baseVal>0 && series!=="pl";
+  const pctc = showPct ? change/baseVal*100 : 0;
 
   // per-position movers: current price vs baseline snapshot price
   const movers = (base&&base.prices) ? st.holdings
@@ -1172,15 +1199,26 @@ function History({st}){
       </div>
 
       <div className="grid cards">
-        <Stat label="Total value · today" value={latest?fmt(latest.value):"—"} unit="SAR" foot={latest?`snapshot ${latest.date}`:"no snapshot yet"}/>
+        <Stat label={SERIES[series].name+" · today"} value={latest?fmt(num(latest[series]), series==="pl"?2:0):"—"} unit="SAR" foot={latest?`snapshot ${latest.date}`:"no snapshot yet"}/>
         <Stat label={label} value={(change>=0?"+":"")+fmt(change,2)} unit="SAR"
-          foot={base?`${(pctc>=0?"+":"")+pct(pctc,2)} vs ${base.date}`:"not enough history yet"} footClass={base?(change>=0?"pos":"neg"):""}/>
+          foot={base?`${showPct?(pctc>=0?"+":"")+pct(pctc,2)+" ":""}vs ${base.date}`:"not enough history yet"} footClass={base?(change>=0?"pos":"neg"):""}/>
         <Stat label="Days tracked" value={sorted.length} foot="one snapshot per day · today updates on each ↻ Prices"/>
       </div>
 
       <section>
-        <div className="sec-head"><h2>Portfolio value</h2><span className="hint">total incl. cash &amp; Stake · full history</span></div>
-        <div className="card"><LineChart points={sorted}/></div>
+        <div className="sec-head"><h2>{SERIES[series].name} trend</h2>
+          <span className="hint">{SERIES[series].hint} · {period} points</span>
+          <span className="grow"/>
+          <div className="seg">
+            {["equity","pl","value"].map(k=>(
+              <button key={k} className={series===k?"on":""} onClick={()=>setSeries(k)}>{SERIES[k].name}</button>
+            ))}
+          </div>
+        </div>
+        <div className="card">
+          <LineChart points={chartPoints} field={series}
+            empty={`Not enough ${period} history yet — needs at least two ${period==="daily"?"days":period==="weekly"?"weeks":"months"} of snapshots.`}/>
+        </div>
       </section>
 
       <section>
@@ -1206,20 +1244,22 @@ function History({st}){
         <div className="sec-head"><h2>Daily snapshots</h2><span className="hint">newest first</span></div>
         {rows.length ? (
           <div className="tbl-wrap"><table>
-            <thead><tr><th>Date</th><th>Total</th><th>Equity</th><th>Cash</th><th>Day Δ</th><th>Δ %</th></tr></thead>
+            <thead><tr><th>Date</th><th>Stocks</th><th>P&amp;L</th><th>Cash</th><th>Total</th><th>Δ {SERIES[series].name}</th><th>Δ %</th></tr></thead>
             <tbody>
               {rows.map((h,i)=>{
                 const p = rows[i+1];   // earlier day (list is newest-first)
-                const chg = p ? h.value-p.value : 0;
-                const pc = p&&p.value ? chg/p.value*100 : 0;
+                const chg = p ? num(h[series])-num(p[series]) : 0;
+                const rowPct = p && num(p[series])>0 && series!=="pl";
+                const pc = rowPct ? chg/num(p[series])*100 : 0;
                 return (
                   <tr key={h.date}>
                     <td><b>{h.date}</b></td>
-                    <td className="num">{sar(h.value)}</td>
-                    <td className="num muted">{sar(h.equity)}</td>
+                    <td className="num">{sar(h.equity)}</td>
+                    <td className={"num "+(num(h.pl)>=0?"pos":"neg")}>{(num(h.pl)>=0?"+":"")+fmt(num(h.pl),2)}</td>
                     <td className="num muted">{sar(h.cash)}</td>
+                    <td className="num muted">{sar(h.value)}</td>
                     <td className={"num "+(p?(chg>=0?"pos":"neg"):"")}>{p?(chg>=0?"+":"")+fmt(chg,2):"—"}</td>
-                    <td className={"num "+(p?(chg>=0?"pos":"neg"):"")}>{p?(pc>=0?"+":"")+pct(pc,2):"—"}</td>
+                    <td className={"num "+(p?(chg>=0?"pos":"neg"):"")}>{rowPct?(pc>=0?"+":"")+pct(pc,2):"—"}</td>
                   </tr>
                 );
               })}
@@ -1228,7 +1268,11 @@ function History({st}){
         ) : <div className="card empty">Open the app (and refresh prices) on a few different days to build the picture.</div>}
       </section>
 
-      <p className="small muted" style={{marginTop:10}}>Week/Month compare against the closest snapshot to 7 / 30 days back (it names the exact date). Movers reflect price moves only. Today's snapshot updates on every price refresh; past days stay fixed.</p>
+      <p className="small muted" style={{marginTop:10}}>
+        <b>Stocks</b> is your equity value — note it also jumps when you <i>buy</i>, so for pure market performance use <b>P&amp;L</b> (unrealized gain/loss, unaffected by deposits and buys).
+        Week/Month chart points are that period's closing snapshot; the change compares against the closest snapshot to 7 / 30 days back (it names the exact date).
+        Movers reflect price moves only. Today's snapshot updates on every price refresh; past days stay fixed.
+      </p>
     </div>
   );
 }
