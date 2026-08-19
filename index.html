@@ -892,7 +892,7 @@ const F = ({label,hint,children}) => (
 function Logs({st,update}){
   const t0 = todayRiyadh();
   const blankTx = {date:t0,ticker:"",action:"BUY",qty:"",price:"",commission:"",note:""};
-  const blankDv = {date:t0,ticker:"",perShare:"",shares:"",note:""};
+  const blankDv = {date:t0,ticker:"",perShare:"",shares:"",note:"",reinvested:false};
   const blankDep = {date:t0,platform:"Sahm",paid:"",credited:"",note:"",earnStart:"",opening:false};
   const blankAdj = {date:t0,field:"cash",value:"",note:""};
   const [tx,setTx]=useState(blankTx);
@@ -919,8 +919,11 @@ function Logs({st,update}){
   }
   function addDv(){
     const ticker=(dv.ticker||"").trim(); if(!ticker) return;
-    const rec={...dv, ticker, perShare:num(dv.perShare), shares:num(dv.shares), total:num(dv.perShare)*num(dv.shares)};
-    update({...st, dividends:[rec, ...(st.dividends||[])]});
+    const total = round2(num(dv.perShare)*num(dv.shares));
+    const rec={...dv, ticker, perShare:num(dv.perShare), shares:num(dv.shares), total, reinvested:!!dv.reinvested};
+    // a cash dividend lands in your buying power; tick "reinvested" when it never hit cash
+    const patch = dv.reinvested ? {} : {cash: round2(num(st.cash)+total)};
+    update({...st, ...patch, dividends:[rec, ...(st.dividends||[])]});
     setDv({...blankDv});
   }
   function addDeposit(){
@@ -948,9 +951,11 @@ function Logs({st,update}){
   function del(src,i){ update({...st, [src]: (st[src]||[]).filter((_,j)=>j!==i)}); }
 
   const inv = investedTotals(st);
+  const yr = t0.slice(0,4);
+  const ytdDiv = (st.dividends||[]).filter(d=>(d.date||"").startsWith(yr)).reduce((a,d)=>a+num(d.total),0);
   const activity=[];
   (st.transactions||[]).forEach((t,i)=> activity.push({date:t.date, type:"Trade", detail:`${t.action} ${fmt(t.qty)} ${t.ticker} @ ${fmt(t.price,2)}`, effect:(t.action==="SELL"?"+":"−")+fmt(t.total,2), cls:t.action==="SELL"?"pos":"neg", src:"transactions", i}));
-  (st.dividends||[]).forEach((d,i)=> activity.push({date:d.date, type:"Dividend", detail:`${d.ticker} · ${fmt(d.perShare,2)}/sh × ${fmt(d.shares)}`, effect:"+"+fmt(d.total,2), cls:"pos", src:"dividends", i}));
+  (st.dividends||[]).forEach((d,i)=> activity.push({date:d.date, type:"Dividend", detail:`${d.ticker} · ${fmt(d.perShare,2)}/sh × ${fmt(d.shares)} = ${fmt(d.total,2)}${d.reinvested?" · reinvested (no cash)":""}`, effect:d.reinvested?"—":"+"+fmt(d.total,2), cls:d.reinvested?"":"pos", src:"dividends", i}));
   (st.deposits||[]).forEach((d,i)=> activity.push({date:d.date, type:"Deposit", detail:`${d.platform}${d.opening?" (opening)":""}${num(d.paid)!==num(d.credited)?` · paid ${fmt(d.paid,2)}, credited ${fmt(d.credited,2)}`:""}${d.earnStart?` · earns ${d.earnStart}`:""}${d.note?` · ${d.note}`:""}`, effect:"+"+fmt(d.paid,2), cls:"", src:"deposits", i}));
   (st.adjustments||[]).forEach((a,i)=> activity.push({date:a.date, type:"Adjust", detail:`${a.label}: ${fmt(a.from,2)} → ${fmt(a.to,2)}${a.note?` · ${a.note}`:""}`, effect:"", cls:"", src:"adjustments", i}));
   activity.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
@@ -961,6 +966,7 @@ function Logs({st,update}){
         <Stat label="Invested — Sahm" value={fmt(inv.sahm)} unit="SAR" foot="sum of your Sahm deposits"/>
         <Stat label="Invested — Stake" value={fmt(inv.stake)} unit="SAR" foot="sum of your Stake contributions"/>
         <Stat label="Invested — total" value={fmt(inv.total)} unit="SAR" foot="money you've put in"/>
+        <Stat label={"Dividends · "+yr} value={fmt(ytdDiv,2)} unit="SAR" foot="collected this year (incl. reinvested)" footClass={ytdDiv>0?"pos":""}/>
       </div>
 
       <div className="two-col">
@@ -976,14 +982,17 @@ function Logs({st,update}){
           <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addTx}>Add trade</button></div>
         </F>
 
-        <F label="Log a dividend">
+        <F label="Log a dividend" hint="credits your cash">
           <div className="controls">
             <div className="field"><label>Date</label><input value={dv.date} onChange={e=>setDv({...dv,date:e.target.value})}/></div>
             <div className="field"><label>Ticker</label><input value={dv.ticker} onChange={e=>setDv({...dv,ticker:e.target.value})}/></div>
             <div className="field"><label>Per share</label><input value={dv.perShare} onChange={e=>setDv({...dv,perShare:e.target.value})}/></div>
             <div className="field"><label>Shares held</label><input value={dv.shares} onChange={e=>setDv({...dv,shares:e.target.value})}/></div>
           </div>
-          <div className="btn-row" style={{marginTop:12}}><button className="btn primary" onClick={addDv}>Add dividend</button></div>
+          <div className="btn-row" style={{marginTop:12}}>
+            <button className="btn primary" onClick={addDv}>Add dividend</button>
+            <label className="toggle"><input type="checkbox" checked={dv.reinvested} onChange={e=>setDv({...dv,reinvested:e.target.checked})}/> reinvested (didn't hit cash)</label>
+          </div>
         </F>
 
         <F label="Record a deposit" hint="money into Sahm / Stake">
