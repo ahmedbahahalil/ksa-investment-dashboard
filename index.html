@@ -237,7 +237,7 @@ const getPricesUrl = () => (localStorage.getItem(PRICES_URL_KEY) || "").trim();
 // Apps Script web apps don't send CORS headers, so a cross-origin fetch() is blocked.
 // JSONP (load via a <script> tag) sidesteps CORS entirely — the script calls our callback.
 let _jsonpN = 0;
-function fetchLivePrices(tickers){
+function fetchLivePrices(tickers, withHistory){
   const url = getPricesUrl();
   if(!url || !tickers.length) return Promise.resolve(null);
   return new Promise((resolve,reject)=>{
@@ -246,7 +246,8 @@ function fetchLivePrices(tickers){
     const cleanup = ()=>{ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(s&&s.parentNode) s.parentNode.removeChild(s); };
     const timer = setTimeout(()=>{ cleanup(); reject(new Error("timeout")); }, 25000);
     window[cb] = (data)=>{ clearTimeout(timer); cleanup(); resolve(data); };
-    const u = url + (url.includes("?")?"&":"?") + "tickers=" + encodeURIComponent(tickers.join(",")) + "&callback=" + cb;
+    const u = url + (url.includes("?")?"&":"?") + "tickers=" + encodeURIComponent(tickers.join(","))
+            + (withHistory?"&history=3mo":"") + "&callback=" + cb;
     s = document.createElement("script");
     s.src = u;
     s.onerror = ()=>{ clearTimeout(timer); cleanup(); reject(new Error("script load failed")); };
@@ -351,8 +352,58 @@ function withSnapshot(st){
     pl: round2(portfolioPL(st.holdings)),
     prices,
   };
-  const hist = (st.history||[]).filter(h=>h.date!==date).concat([snap]).sort((a,b)=> a.date<b.date?-1:1);
+  const hist = (st.history||[]).filter(h=>h.date!==date).concat([{...snap, src:"live"}]).sort((a,b)=> a.date<b.date?-1:1);
   return {...st, history: hist};
+}
+
+// Cash effect of one logged trade (mirrors addTx: commission is paid on both sides).
+const tradeCashDelta = t => t.action==="SELL"
+  ? (num(t.qty)*num(t.price) - num(t.commission))
+  : -(num(t.qty)*num(t.price) + num(t.commission));
+
+// Rebuild past daily snapshots from official closing prices.
+// Shares/cash/Stake for a past day are rolled back through the logged ledger; where a
+// trade or deposit was never logged, that day falls back to today's figures (approximate).
+function backfillFromCloses(st, closes){
+  const today = todayRiyadh();
+  const dates = new Set();
+  Object.keys(closes||{}).forEach(t=> Object.keys(closes[t]||{}).forEach(d=> dates.add(d)));
+  const past = [...dates].filter(d=> d < today);
+  if(!past.length) return st;
+
+  const byDate = new Map((st.history||[]).map(h=>[h.date,h]));
+  past.forEach(d=>{
+    let equity=0, pl=0;
+    const prices={};
+    st.holdings.forEach(h=>{
+      const tk = (h.ticker||"").trim();
+      const px = num((closes[tk]||{})[d]);
+      if(!tk || px<=0) return;
+      // shares held at the close of d = today's shares, minus buys since, plus sells since
+      let sh = num(h.shares);
+      (st.transactions||[]).forEach(t=>{
+        if((t.date||"") > d && (t.ticker||"").trim()===tk)
+          sh += (t.action==="SELL" ? num(t.qty) : -num(t.qty));
+      });
+      sh = Math.max(0, sh);
+      prices[tk] = px;
+      equity += px*sh;
+      if(num(h.avgCost)>0) pl += (px-num(h.avgCost))*sh;   // avg cost approximated at today's basis
+    });
+
+    let cash = num(st.cash), stake = num(st.stake.currentValue);
+    (st.transactions||[]).forEach(t=>{ if((t.date||"") > d) cash -= tradeCashDelta(t); });
+    (st.dividends||[]).forEach(x=>{ if((x.date||"") > d && !x.reinvested) cash -= num(x.total); });
+    (st.deposits||[]).forEach(x=>{
+      if((x.date||"") > d && !x.opening){
+        if(x.platform==="Stake") stake -= num(x.credited); else cash -= num(x.credited);
+      }
+    });
+
+    byDate.set(d, {date:d, value:round2(equity+cash+stake), equity:round2(equity),
+                   cash:round2(cash), pl:round2(pl), prices, src:"close"});
+  });
+  return {...st, history:[...byDate.values()].sort((a,b)=> a.date<b.date?-1:1)};
 }
 function weightedEquityYield(holdings){
   const tw = holdings.reduce((a,h)=>a+num(h.targetPct),0)||1;
@@ -1262,7 +1313,9 @@ function History({st}){
                 const pc = rowPct ? chg/num(p[series])*100 : 0;
                 return (
                   <tr key={h.date}>
-                    <td><b>{h.date}</b></td>
+                    <td title={h.src==="close"?"reconstructed from that day's official close":"captured live in the app"}>
+                      <b>{h.date}</b>{h.src==="close" && <span className="tiny muted"> ·c</span>}
+                    </td>
                     <td className="num">{sar(h.equity)}</td>
                     <td className={"num "+(num(h.pl)>=0?"pos":"neg")}>{(num(h.pl)>=0?"+":"")+fmt(num(h.pl),2)}</td>
                     <td className="num muted">{sar(h.cash)}</td>
@@ -1280,7 +1333,9 @@ function History({st}){
       <p className="small muted" style={{marginTop:10}}>
         <b>Stocks</b> is your equity value — note it also jumps when you <i>buy</i>, so for pure market performance use <b>P&amp;L</b> (unrealized gain/loss, unaffected by deposits and buys).
         Week/Month chart points are that period's closing snapshot; the change compares against the closest snapshot to 7 / 30 days back (it names the exact date).
-        Movers reflect price moves only. Today's snapshot updates on every price refresh; past days stay fixed.
+        Movers reflect price moves only. Today's snapshot updates on every price refresh.
+        Past days marked <span className="tiny muted">·c</span> were rebuilt from that day's <b>official close</b> (fetched automatically, ~3 months back)
+        — share counts, cash and Stake are rolled back through your logged trades, dividends and deposits, so days before an <i>unlogged</i> trade are approximate.
       </p>
     </div>
   );
@@ -1354,12 +1409,16 @@ function App(){
     if(!tickers.length) return;
     setPriceState("busy");
     try{
-      const data = await fetchLivePrices(tickers);
+      const data = await fetchLivePrices(tickers, true);
       const prices = (data && data.prices) || {};
       let n=0;
       const holdings = st.holdings.map(h=>{ const p=num(prices[h.ticker]); if(p>0){ n++; return {...h, price:p}; } return h; });
       const watchlist = wl.map(w=>{ const p=num(prices[w.ticker]); if(p>0){ n++; return {...w, price:p}; } return w; });
-      if(n>0) setSt(withSnapshot({...st, holdings, watchlist, settings:{...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"}}));
+      let next = {...st, holdings, watchlist};
+      if(n>0) next.settings = {...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"};
+      const closes = data && data.closes;
+      if(closes) next = backfillFromCloses(next, closes);      // fill/correct past days from official closes
+      if(n>0 || closes) setSt(withSnapshot(next));
       setPriceState(n>0 ? "" : "no prices returned");
     }catch(e){ setPriceState("couldn't reach price source"); }
   }

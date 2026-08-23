@@ -71,6 +71,9 @@ function doGet(e) {
     .split(",").map(function (s) { return s.trim(); }).filter(String);
   var prices = fetchPrices_(tickers);
   var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
+  // ?history=3mo also returns daily closes so the dashboard can backfill its History tab
+  var range = e && e.parameter && e.parameter.history;
+  if (range) out.closes = fetchCloses_(tickers, range === "1" ? "3mo" : range);
   var json = JSON.stringify(out);
   // JSONP: Apps Script sends no CORS headers, so the dashboard loads this via a <script> tag
   // and passes ?callback=fn. Wrap the JSON in that call. (Plain ?tickers=… still returns JSON.)
@@ -98,6 +101,42 @@ function fetchPrices_(tickers) {
   responses.forEach(function (resp, i) {
     var p = parsePrice_(resp);
     if (p > 0) out[tickers[i]] = p;
+  });
+  return out;
+}
+
+// Daily CLOSING prices over `range` (e.g. "3mo"), per ticker: { ticker: { "YYYY-MM-DD": close } }.
+// Lets the dashboard fill in days it wasn't open, and replace intraday snapshots with the real close.
+function fetchCloses_(tickers, range) {
+  tickers = (tickers || []).map(function (t) { return (t || "").trim(); }).filter(String);
+  var out = {};
+  if (!tickers.length) return out;
+  var requests = tickers.map(function (t) {
+    return {
+      url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(t) + ".SR"
+         + "?range=" + encodeURIComponent(range || "3mo") + "&interval=1d",
+      muteHttpExceptions: true,
+      headers: { "User-Agent": "Mozilla/5.0" }
+    };
+  });
+  var responses;
+  try { responses = UrlFetchApp.fetchAll(requests); } catch (e) { return out; }
+  responses.forEach(function (resp, i) {
+    try {
+      if (resp.getResponseCode() !== 200) return;
+      var r = JSON.parse(resp.getContentText());
+      r = r && r.chart && r.chart.result && r.chart.result[0];
+      var ts = r && r.timestamp;
+      var closes = r && r.indicators && r.indicators.quote && r.indicators.quote[0] && r.indicators.quote[0].close;
+      if (!ts || !closes) return;
+      var m = {};
+      ts.forEach(function (t, k) {
+        var c = closes[k];
+        if (c === null || c === undefined) return;                     // market holiday / missing bar
+        m[Utilities.formatDate(new Date(t * 1000), TIMEZONE, "yyyy-MM-dd")] = Math.round(c * 100) / 100;
+      });
+      out[tickers[i]] = m;
+    } catch (e) {}
   });
   return out;
 }
