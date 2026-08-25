@@ -72,8 +72,13 @@ function doGet(e) {
   var prices = fetchPrices_(tickers);
   var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
   // ?history=3mo also returns daily closes so the dashboard can backfill its History tab
+  // History is only needed for held positions, so it takes its own (shorter) ticker list.
   var range = e && e.parameter && e.parameter.history;
-  if (range) out.closes = fetchCloses_(tickers, range === "1" ? "3mo" : range);
+  if (range) {
+    var ht = ((e.parameter.histTickers || e.parameter.tickers) || "")
+      .split(",").map(function (s) { return s.trim(); }).filter(String);
+    out.closes = fetchCloses_(ht, range === "1" ? "3mo" : range);
+  }
   var json = JSON.stringify(out);
   // JSONP: Apps Script sends no CORS headers, so the dashboard loads this via a <script> tag
   // and passes ?callback=fn. Wrap the JSON in that call. (Plain ?tickers=… still returns JSON.)
