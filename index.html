@@ -370,18 +370,29 @@ const tradeCashDelta = t => t.action==="SELL"
 function backfillFromCloses(st, closes){
   const today = todayRiyadh();
   const dates = new Set();
-  Object.keys(closes||{}).forEach(t=> Object.keys(closes[t]||{}).forEach(d=> dates.add(d)));
+  const series = {};                                   // ticker → ascending [[date, close], …]
+  Object.keys(closes||{}).forEach(t=>{
+    series[t] = Object.keys(closes[t]||{}).sort().map(d=>{ dates.add(d); return [d, num(closes[t][d])]; });
+  });
   const past = [...dates].filter(d=> d < today);
   if(!past.length) return st;
 
+  // latest close on or before d — carries the last price across holidays and missing bars
+  const closeAt = (tk,d)=>{
+    const s = series[tk]; if(!s || !s.length) return 0;
+    let lo=0, hi=s.length-1, best=0;
+    while(lo<=hi){ const mid=(lo+hi)>>1;
+      if(s[mid][0] <= d){ best = s[mid][1]; lo = mid+1; } else hi = mid-1; }
+    return best;
+  };
+
   const byDate = new Map((st.history||[]).map(h=>[h.date,h]));
   past.forEach(d=>{
-    let equity=0, pl=0;
+    let equity=0, pl=0, incomplete=false;
     const prices={};
     st.holdings.forEach(h=>{
       const tk = (h.ticker||"").trim();
-      const px = num((closes[tk]||{})[d]);
-      if(!tk || px<=0) return;
+      if(!tk) return;
       // shares held at the close of d = today's shares, minus buys since, plus sells since
       let sh = num(h.shares);
       (st.transactions||[]).forEach(t=>{
@@ -389,10 +400,14 @@ function backfillFromCloses(st, closes){
           sh += (t.action==="SELL" ? num(t.qty) : -num(t.qty));
       });
       sh = Math.max(0, sh);
+      if(sh<=0) return;                                 // wasn't held that day — contributes nothing
+      const px = closeAt(tk, d);
+      if(px<=0){ incomplete = true; return; }           // held, but no price that far back
       prices[tk] = px;
       equity += px*sh;
       if(num(h.avgCost)>0) pl += (px-num(h.avgCost))*sh;   // avg cost approximated at today's basis
     });
+    if(incomplete) return;                              // skip the day rather than understate it
 
     let cash = num(st.cash), stake = num(st.stake.currentValue);
     (st.transactions||[]).forEach(t=>{ if((t.date||"") > d) cash -= tradeCashDelta(t); });
@@ -1420,9 +1435,11 @@ function App(){
       let next = {...st, holdings, watchlist};
       if(n>0) next.settings = {...st.settings, pricesUpdated:(data.asOf||new Date().toLocaleString())+" (live)"};
       const closes = data && data.closes;
-      if(closes) next = backfillFromCloses(next, closes);      // fill/correct past days from official closes
-      if(n>0 || closes) setSt(withSnapshot(next));
-      setPriceState(n>0 ? "" : "no prices returned");
+      const nClose = closes ? Object.keys(closes).length : 0;
+      if(nClose) next = backfillFromCloses(next, closes);      // fill/correct past days from official closes
+      if(n>0 || nClose) setSt(withSnapshot(next));
+      setPriceState(!n ? "no prices returned"
+        : (closes && !nClose) ? "prices ok, but the history fetch came back empty" : "");
     }catch(e){ setPriceState("couldn't reach price source"); }
   }
 

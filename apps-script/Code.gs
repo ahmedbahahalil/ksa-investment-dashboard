@@ -10,10 +10,11 @@
  *   2. Run installDailyTrigger() once (authorize Drive access when prompted).
  *   3. Optionally run refreshPrices() once to test it now.
  *
- * Prices are fetched from Yahoo Finance (ticker + ".SR") in parallel via
- * UrlFetchApp.fetchAll — fast even for a long watchlist. It's an unofficial
- * endpoint and may rate-limit; if a price comes back 0 the old price is kept.
- * Swap fetchPrices_()/parsePrice_() if you have a better data source.
+ * Prices (and optional daily closes) come from Yahoo Finance (ticker + ".SR"),
+ * fetched in parallel via UrlFetchApp.fetchAll — one request per ticker, since
+ * hitting the same ticker twice in a run gets the second call rate-limited.
+ * It's an unofficial endpoint; if a price comes back 0 the old price is kept.
+ * Swap fetchMarket_() if you have a better data source.
  */
 
 var PORTFOLIO_FILE = "ksa-portfolio.json";
@@ -69,15 +70,30 @@ function refreshPrices() {
 function doGet(e) {
   var tickers = ((e && e.parameter && e.parameter.tickers) || "")
     .split(",").map(function (s) { return s.trim(); }).filter(String);
-  var prices = fetchPrices_(tickers);
-  var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
-  // ?history=3mo also returns daily closes so the dashboard can backfill its History tab
+  // ?history=3mo also returns daily closes so the dashboard can backfill its History tab.
   // History is only needed for held positions, so it takes its own (shorter) ticker list.
   var range = e && e.parameter && e.parameter.history;
+  if (range === "1") range = "3mo";
+  var histT = range
+    ? ((e.parameter.histTickers || e.parameter.tickers) || "").split(",")
+        .map(function (s) { return s.trim(); }).filter(String)
+    : [];
+  var inHist = {};
+  histT.forEach(function (t) { inHist[t] = true; });
+
+  // Each ticker is fetched ONCE: held names come back with their history, the rest price-only.
+  var withHist = fetchMarket_(histT, range);
+  var priceOnly = fetchMarket_(tickers.filter(function (t) { return !inHist[t]; }), null);
+
+  var prices = {};
+  Object.keys(priceOnly.prices).forEach(function (t) { prices[t] = priceOnly.prices[t]; });
+  Object.keys(withHist.prices).forEach(function (t) { prices[t] = withHist.prices[t]; });
+
+  var out = { prices: prices, asOf: Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd HH:mm") };
   if (range) {
-    var ht = ((e.parameter.histTickers || e.parameter.tickers) || "")
-      .split(",").map(function (s) { return s.trim(); }).filter(String);
-    out.closes = fetchCloses_(ht, range === "1" ? "3mo" : range);
+    out.closes = withHist.closes;
+    // surfaced so a failure is diagnosable from the browser rather than guessed at
+    out.closesInfo = { asked: histT.length, ok: Object.keys(withHist.closes).length, codes: withHist.codes };
   }
   var json = JSON.stringify(out);
   // JSONP: Apps Script sends no CORS headers, so the dashboard loads this via a <script> tag
@@ -89,71 +105,58 @@ function doGet(e) {
   return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
 }
 
-// Fetches all tickers in PARALLEL (UrlFetchApp.fetchAll) — ~1–2s for 16 vs ~15s one-by-one.
-function fetchPrices_(tickers) {
+/**
+ * One request per ticker returns BOTH the current price and (when `range` is given)
+ * that ticker's daily closes — the chart payload already carries both.
+ * Fetching a ticker twice in one run gets the second call throttled by Yahoo, which
+ * is exactly why history used to come back empty while prices succeeded.
+ * Returns { prices:{t:price}, closes:{t:{date:close}}, codes:{t:httpStatus} }.
+ */
+function fetchMarket_(tickers, range) {
   tickers = (tickers || []).map(function (t) { return (t || "").trim(); }).filter(String);
-  var out = {};
-  if (!tickers.length) return out;
-  var requests = tickers.map(function (t) {
-    return {
-      url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(t) + ".SR",
-      muteHttpExceptions: true,
-      headers: { "User-Agent": "Mozilla/5.0" }
-    };
-  });
-  var responses;
-  try { responses = UrlFetchApp.fetchAll(requests); } catch (e) { return out; }
-  responses.forEach(function (resp, i) {
-    var p = parsePrice_(resp);
-    if (p > 0) out[tickers[i]] = p;
-  });
-  return out;
-}
-
-// Daily CLOSING prices over `range` (e.g. "3mo"), per ticker: { ticker: { "YYYY-MM-DD": close } }.
-// Lets the dashboard fill in days it wasn't open, and replace intraday snapshots with the real close.
-function fetchCloses_(tickers, range) {
-  tickers = (tickers || []).map(function (t) { return (t || "").trim(); }).filter(String);
-  var out = {};
+  var out = { prices: {}, closes: {}, codes: {} };
   if (!tickers.length) return out;
   var requests = tickers.map(function (t) {
     return {
       url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(t) + ".SR"
-         + "?range=" + encodeURIComponent(range || "3mo") + "&interval=1d",
+         + (range ? "?range=" + encodeURIComponent(range) + "&interval=1d" : ""),
       muteHttpExceptions: true,
       headers: { "User-Agent": "Mozilla/5.0" }
     };
   });
   var responses;
-  try { responses = UrlFetchApp.fetchAll(requests); } catch (e) { return out; }
+  try { responses = UrlFetchApp.fetchAll(requests); }
+  catch (e) { out.codes.__fetchAll = String(e); return out; }
+
   responses.forEach(function (resp, i) {
+    var tk = tickers[i];
     try {
-      if (resp.getResponseCode() !== 200) return;
+      var code = resp.getResponseCode();
+      out.codes[tk] = code;
+      if (code !== 200) return;
       var r = JSON.parse(resp.getContentText());
       r = r && r.chart && r.chart.result && r.chart.result[0];
-      var ts = r && r.timestamp;
-      var closes = r && r.indicators && r.indicators.quote && r.indicators.quote[0] && r.indicators.quote[0].close;
-      if (!ts || !closes) return;
+      if (!r) return;
+      var p = r.meta && r.meta.regularMarketPrice;
+      if (p) out.prices[tk] = Number(p);
+      if (!range) return;
+      var ts = r.timestamp;
+      var cl = r.indicators && r.indicators.quote && r.indicators.quote[0] && r.indicators.quote[0].close;
+      if (!ts || !cl) return;
       var m = {};
       ts.forEach(function (t, k) {
-        var c = closes[k];
-        if (c === null || c === undefined) return;                     // market holiday / missing bar
+        var c = cl[k];
+        if (c === null || c === undefined) return;              // market holiday / missing bar
         m[Utilities.formatDate(new Date(t * 1000), TIMEZONE, "yyyy-MM-dd")] = Math.round(c * 100) / 100;
       });
-      out[tickers[i]] = m;
-    } catch (e) {}
+      out.closes[tk] = m;
+    } catch (err) { out.codes[tk] = "parse:" + err; }
   });
   return out;
 }
 
-function parsePrice_(resp) {
-  try {
-    if (resp.getResponseCode() !== 200) return 0;
-    var j = JSON.parse(resp.getContentText());
-    var meta = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
-    return meta && meta.regularMarketPrice ? Number(meta.regularMarketPrice) : 0;
-  } catch (e) { return 0; }
-}
+// Current prices only (used by the daily cron).
+function fetchPrices_(tickers) { return fetchMarket_(tickers, null).prices; }
 
 function findPortfolioFile_() {
   var it = DriveApp.getFilesByName(PORTFOLIO_FILE);
